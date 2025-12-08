@@ -15,7 +15,7 @@ try:  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
-from ade_engine import ADEngine, __version__
+from ade_engine import Engine, __version__
 from ade_engine.reporting import build_reporting, protect_stdout
 from ade_engine.settings import Settings
 from ade_engine.types.run import RunRequest, RunResult, RunStatus
@@ -176,6 +176,8 @@ def print_text_summary(reports: list[RunReport], *, to_stderr: bool = False) -> 
             parts.append(f"{result.error.code.value}: {message}")
 
         typer.echo(" | ".join(part for part in parts if part), err=to_stderr)
+
+
 @app.command("run")
 def run_command(
     input: list[Path] = typer.Option(
@@ -205,8 +207,12 @@ def run_command(
     ),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", file_okay=False, dir_okay=True),
     output_file: Optional[Path] = typer.Option(None, "--output-file", file_okay=True, dir_okay=False),
-    logs_dir: Optional[Path] = typer.Option(None, "--logs-dir", file_okay=False, dir_okay=True, help="(Optional) logs directory."),
-    logs_file: Optional[Path] = typer.Option(None, "--logs-file", file_okay=True, dir_okay=False, help="(Optional) log output file path."),
+    logs_dir: Optional[Path] = typer.Option(
+        None, "--logs-dir", file_okay=False, dir_okay=True, help="(Optional) logs directory."
+    ),
+    logs_file: Optional[Path] = typer.Option(
+        None, "--logs-file", file_okay=True, dir_okay=False, help="(Optional) log output file path."
+    ),
     log_format: str = typer.Option("text", "--log-format", help="Log output format: text or ndjson."),
     meta: list[str] = typer.Option([], "--meta", help="Extra metadata KEY=VALUE included in all events (repeatable)."),
     config_package: Optional[str] = typer.Option(
@@ -239,7 +245,7 @@ def run_command(
     )
 
     base_meta = parse_metadata(meta)
-    engine = ADEngine(settings=settings)
+    engine = Engine(settings=settings)
 
     reports: list[RunReport] = []
     exit_code = 0

@@ -72,8 +72,6 @@ def _score_rows(
                 detector.func,
                 row_index=row_index,
                 row_values=values,
-                # Common alias older scripts used.
-                values=values,
             )
             deltas = _normalize_row_detector_scores(result, detector=detector)
             for label, delta in deltas.items():
