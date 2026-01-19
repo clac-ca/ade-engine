@@ -22,6 +22,14 @@ dev = [
     { name = "twine" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "build" },
+    { name = "import-linter" },
+    { name = "pytest" },
+    { name = "twine" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2.2" },
@@ -35,6 +43,14 @@ requires-dist = [
     { name = "typer", specifier = "==0.20.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "build", specifier = ">=1.2.2" },
+    { name = "import-linter", specifier = ">=2.0" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "twine", specifier = ">=6.0" },
+]
 
 [[package]]
 name = "annotated-types"

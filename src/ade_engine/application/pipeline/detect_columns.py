@@ -63,12 +63,13 @@ def detect_and_map_columns(
     metadata: dict,
     input_file_name: str,
     logger: RunLogger,
+    emit_events: bool = True,
 ) -> tuple[List[MappedColumn], List[SourceColumn], dict[int, dict[str, float]], set[int]]:
     mapping_candidates: Dict[int, Tuple[str, float]] = {}
     field_competitors: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
     contributions_by_column: Dict[int, Dict[str, List[Dict[str, float]]]] = {}
     scores_by_column: Dict[int, Dict[str, float]] = {}
-    debug = logger.isEnabledFor(logging.DEBUG)
+    debug = emit_events and logger.isEnabledFor(logging.DEBUG)
 
     for col in source_columns:
         if not (0 <= col.index < len(table.columns)):

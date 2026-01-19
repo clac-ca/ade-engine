@@ -144,6 +144,20 @@ def _apply_mapping_as_rename(
     return table.rename(rename_map), rename_map
 
 
+def _mapping_ratio(table_result: TableResult) -> float:
+    total_cols = len(getattr(table_result, "source_columns", []) or [])
+    if total_cols <= 0:
+        return 0.0
+    mapped_cols = len(getattr(table_result, "mapped_columns", []) or [])
+    return mapped_cols / total_cols
+
+
+def _sort_tables_by_mapping_ratio(tables: list[TableResult]) -> list[TableResult]:
+    indexed = list(enumerate(tables))
+    indexed.sort(key=lambda item: (-_mapping_ratio(item[1]), item[0]))
+    return [table for _, table in indexed]
+
+
 class Pipeline:
     """Orchestrates sheet-level processing using the registry."""
 
@@ -185,12 +199,9 @@ class Pipeline:
 
         tables: list[TableResult] = []
         for table_index, detected_region in enumerate(table_regions):
-            if table_index > 0:
-                writer.blank_row()
             tables.append(
-                self._process_table(
+                self._build_table_result(
                     sheet=sheet,
-                    writer=writer,
                     rows=rows,
                     table_region=detected_region,
                     state=state,
@@ -200,13 +211,28 @@ class Pipeline:
                 )
             )
 
-        return tables
+        write_order = tables
+        if self.settings.sort_tables_by_mapping_ratio:
+            write_order = _sort_tables_by_mapping_ratio(tables)
 
-    def _process_table(
+        for write_index, table_result in enumerate(write_order):
+            if write_index > 0:
+                writer.blank_row()
+            self._write_table_result(
+                table_result=table_result,
+                writer=writer,
+                state=state,
+                metadata=metadata,
+                input_file_name=input_file_name,
+                sheet=sheet,
+            )
+
+        return write_order
+
+    def _build_table_result(
         self,
         *,
         sheet: Worksheet,
-        writer: SheetWriter,
         rows: List[List[Any]],
         table_region: TableRegion,
         state: dict,
@@ -351,6 +377,18 @@ class Pipeline:
             row_count=table.height,
         )
 
+        return table_result
+
+    def _write_table_result(
+        self,
+        *,
+        table_result: TableResult,
+        writer: SheetWriter,
+        state: dict,
+        metadata: dict,
+        input_file_name: str,
+        sheet: Worksheet,
+    ) -> None:
         write_table = render_table(
             table_result=table_result,
             writer=writer,
@@ -376,11 +414,11 @@ class Pipeline:
             output_sheet=writer.worksheet,
             write_table=write_table,
             output_region=table_result.output_region,
-            table_index=table_index,
+            table_index=table_result.table_index,
             table_result=table_result,
             logger=self.logger,
         )
-        return table_result
+        return None
 
     # ------------------------------------------------------------------
     # Helpers

@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     # Mapping behavior
     mapping_tie_resolution: Literal["leftmost", "leave_unmapped"] = Field(default="leftmost")
 
+    # Table output ordering
+    sort_tables_by_mapping_ratio: bool = Field(default=False)
+
     # Logging
     log_format: Literal["text", "ndjson"] = Field(default="text")
     log_level: int = Field(

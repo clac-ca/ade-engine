@@ -57,3 +57,11 @@ include = ["ade_engine*"]
 addopts = "-q"
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+  "build>=1.2.2",
+  "import-linter>=2.0",
+  "pytest>=8.0",
+  "twine>=6.0",
+]

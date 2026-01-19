@@ -59,6 +59,70 @@ def test_process_sheet_renders_multiple_tables_with_blank_row():
     ]
 
 
+def test_process_sheet_sorts_tables_by_mapping_ratio():
+    registry = Registry()
+    logger = NullLogger()
+
+    registry.register_field(FieldDef(name="email"))
+    registry.register_field(FieldDef(name="name"))
+
+    def detector(*, row_index, **_):
+        if row_index in (1, 4):
+            return {RowKind.HEADER.value: 1.0}
+        if row_index in (2, 5):
+            return {RowKind.DATA.value: 1.0}
+        return {}
+
+    def detect_email(*, column_header_original, **_):
+        return {"email": 1.0} if column_header_original.strip().lower() == "email" else {}
+
+    def detect_name(*, column_header_original, **_):
+        return {"name": 1.0} if column_header_original.strip().lower() == "name" else {}
+
+    registry.register_row_detector(detector, row_kind=RowKind.UNKNOWN.value, priority=0)
+    registry.register_column_detector(detect_email, field="email", priority=0)
+    registry.register_column_detector(detect_name, field="name", priority=0)
+    registry.finalize()
+
+    pipeline = Pipeline(
+        registry=registry,
+        settings=Settings(sort_tables_by_mapping_ratio=True),
+        logger=logger,
+    )
+
+    source_wb = Workbook()
+    source_ws = source_wb.active
+    source_ws.title = "Sheet1"
+    source_ws.append(["Email", "Notes"])
+    source_ws.append(["a@example.com", "first"])
+    source_ws.append([])
+    source_ws.append(["Email", "Name"])
+    source_ws.append(["b@example.com", "Bob"])
+
+    output_wb = Workbook()
+    output_wb.remove(output_wb.active)
+    output_ws = output_wb.create_sheet(title="Sheet1")
+
+    tables = pipeline.process_sheet(
+        sheet=source_ws,
+        output_sheet=output_ws,
+        state={},
+        metadata={"input_file": "input.xlsx", "sheet_index": 0},
+        input_file_name="input.xlsx",
+    )
+
+    assert [t.table_index for t in tables] == [1, 0]
+
+    emitted = list(output_ws.iter_rows(min_row=1, max_row=5, max_col=2, values_only=True))
+    assert emitted == [
+        ("email", "name"),
+        ("b@example.com", "Bob"),
+        (None, None),  # blank separator row
+        ("email", "Notes"),
+        ("a@example.com", "first"),
+    ]
+
+
 def test_process_sheet_handles_mixed_numeric_types():
     registry = Registry()
     logger = NullLogger()

@@ -20,6 +20,7 @@
 
 - `remove_unmapped_columns: bool` — drop non-canonical columns from the written output (default `False`).
 - `write_diagnostics_columns: bool` — include engine-reserved `__ade_*` columns in the written output (default `False`).
+- `sort_tables_by_mapping_ratio: bool` — write tables in descending order of mapped-columns ratio (default `False`).
 
 ## Mapping behavior
 
@@ -61,6 +62,7 @@ They do not affect transforms or validators, which always process all rows.
 ```toml
 remove_unmapped_columns = false
 write_diagnostics_columns = false
+sort_tables_by_mapping_ratio = false
 mapping_tie_resolution = "leftmost"
 detector_column_sample_size = 100
 merge_stacked_headers = true

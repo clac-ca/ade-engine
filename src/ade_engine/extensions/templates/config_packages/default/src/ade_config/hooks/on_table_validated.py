@@ -29,7 +29,7 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any, TYPE_CHECKING
 
 import polars as pl
-from polars.type_aliases import PolarsDataType
+from polars._typing import PolarsDataType
 from ade_engine.models import TableRegion
 
 if TYPE_CHECKING:
