@@ -2,7 +2,22 @@
 
 Lightweight, configurable engine for normalizing Excel/CSV workbooks. This README is a fast path to install, scaffold a config package, and run single/batch jobs.
 
+## Requirements
+
+- Python 3.11+
+- pip
+
 ## Install
+
+### From this repo (local dev)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### From GitHub
 
 ```bash
 # Stable
@@ -10,6 +25,12 @@ pip install "git+https://github.com/clac-ca/automatic-data-extractor.git#subdire
 
 # Development branch
 pip install "git+https://github.com/clac-ca/automatic-data-extractor@development#subdirectory=apps/ade-engine"
+```
+
+## Run tests
+
+```bash
+pytest -q
 ```
 
 ## Quickstart

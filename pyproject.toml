@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=80"]
+requires = ["setuptools>=80", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,13 @@ description = "Deterministic workbook normalization engine (detect â†’ extract â
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "CLAC IT Team" }]
-license = { text = "Proprietary" }
+license = { file = "LICENSE" }
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Typing :: Typed",
+]
 dependencies = [
   "openpyxl==3.1.5",
   "polars==1.36.1",
@@ -20,8 +26,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2.2",
   "import-linter>=2.0",
   "pytest>=8.0",
+  "twine>=6.0",
 ]
 
 [project.scripts]
