@@ -14,17 +14,16 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          cache: true
-          cache-dependency-path: uv.lock
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          cache: true
+          cache-dependency-path: uv.lock
       - name: Install dependencies
         run: |
           uv sync --group dev
