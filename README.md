@@ -5,7 +5,7 @@ Lightweight, configurable engine for normalizing Excel/CSV workbooks. This READM
 ## Requirements
 
 - Python 3.11+
-- pip
+- pip (or uv)
 
 ## Install
 
@@ -15,6 +15,12 @@ Lightweight, configurable engine for normalizing Excel/CSV workbooks. This READM
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+```
+
+### From this repo (uv)
+
+```bash
+uv sync
 ```
 
 ### From GitHub
@@ -73,3 +79,7 @@ Notes:
 - Logs and outputs default to `./logs` and `./output` when not provided.
 - To change defaults globally, set environment variables with the `ADE_ENGINE_` prefix or add a `settings.toml` alongside your runs.
 - Need types for the web app? From the repo root, run `ade types` (if working in the full monorepo).
+
+## License
+
+MIT License. See `LICENSE`.
