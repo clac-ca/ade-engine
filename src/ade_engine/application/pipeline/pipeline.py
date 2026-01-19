@@ -158,6 +158,65 @@ def _sort_tables_by_mapping_ratio(tables: list[TableResult]) -> list[TableResult
     return [table for _, table in indexed]
 
 
+def _ordered_column_union(tables: list[TableResult]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for table_result in tables:
+        for name in table_result.table.columns:
+            if name in seen:
+                continue
+            seen.add(name)
+            ordered.append(name)
+    return ordered
+
+
+def _merge_source_regions(tables: list[TableResult]) -> TableRegion:
+    regions = [table.source_region for table in tables if isinstance(table.source_region, TableRegion)]
+    if not regions:
+        return TableRegion(min_row=1, min_col=1, max_row=1, max_col=1, header_row_count=1)
+
+    min_row = min(region.min_row for region in regions)
+    min_col = min(region.min_col for region in regions)
+    max_row = max(region.max_row for region in regions)
+    max_col = max(region.max_col for region in regions)
+    header_row_count = min(
+        max(1, int(getattr(region, "header_row_count", 1) or 1)) for region in regions
+    )
+    return TableRegion(
+        min_row=min_row,
+        min_col=min_col,
+        max_row=max_row,
+        max_col=max(1, max_col),
+        header_row_count=header_row_count,
+    )
+
+
+def _merge_tables_in_sheet(tables: list[TableResult]) -> list[TableResult]:
+    if len(tables) <= 1:
+        return tables
+
+    merged = pl.concat([table.table for table in tables], how="diagonal")
+    ordered_columns = _ordered_column_union(tables)
+    if ordered_columns:
+        merged = merged.select(ordered_columns)
+
+    template = tables[0]
+    merged_result = TableResult(
+        sheet_name=template.sheet_name,
+        table=merged,
+        source_region=_merge_source_regions(tables),
+        source_columns=template.source_columns,
+        table_index=0,
+        sheet_index=template.sheet_index,
+        mapped_columns=template.mapped_columns,
+        unmapped_columns=template.unmapped_columns,
+        column_scores=template.column_scores,
+        duplicate_unmapped_indices=set(template.duplicate_unmapped_indices),
+        row_count=merged.height,
+    )
+    return [merged_result]
+
+
 class Pipeline:
     """Orchestrates sheet-level processing using the registry."""
 
@@ -214,6 +273,8 @@ class Pipeline:
         write_order = tables
         if self.settings.sort_tables_by_mapping_ratio:
             write_order = _sort_tables_by_mapping_ratio(tables)
+        if self.settings.merge_tables_in_sheet:
+            write_order = _merge_tables_in_sheet(write_order)
 
         for write_index, table_result in enumerate(write_order):
             if write_index > 0:
