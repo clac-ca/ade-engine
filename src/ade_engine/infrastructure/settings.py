@@ -89,6 +89,7 @@ class Settings(BaseSettings):
 
     # Table output ordering
     sort_tables_by_mapping_ratio: bool = Field(default=False)
+    merge_tables_in_sheet: bool = Field(default=False)
 
     # Logging
     log_format: Literal["text", "ndjson"] = Field(default="text")
