@@ -487,6 +487,7 @@ class ColumnStructure(StrictModel):
     index: NonNegativeInt
     header: ColumnHeader
     non_empty_cells: NonNegativeInt
+    valid_cells: NonNegativeInt | None = None
     mapping: Mapping
 
 

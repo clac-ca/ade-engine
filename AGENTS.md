@@ -159,6 +159,11 @@ Keep logs:
 ## Editing guidance (how to behave as an agent)
 
 * Prefer **small commits** and **surgical changes**.
+* Commit messages must follow Conventional Commits (release-please).
+* Format: `type(scope): summary` or `type!: summary` for breaking changes
+* Allowed `type`: `feat`, `fix`, `chore`, `refactor`, `test`, `docs`
+* `summary` is imperative and <= 72 chars; `scope` is optional but preferred
+* Use `BREAKING CHANGE:` in the body when applicable
 * Don’t rename public APIs casually:
 
   * If you move modules, consider adding a thin re-export in `compat/` (or preserve imports).
