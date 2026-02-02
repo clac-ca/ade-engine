@@ -384,10 +384,10 @@ class RunCompletionReportBuilder:
                 unmapped_count += 1
 
             valid_cells = None
-            if validated_row_count is not None and mapping.status == "mapped" and mapping.field is not None:
+            if mapping.status == "mapped" and mapping.field is not None:
                 invalid_cells = invalid_by_field.get(mapping.field)
                 if invalid_cells is not None:
-                    valid_cells = max(0, validated_row_count - invalid_cells)
+                    valid_cells = max(0, int(non_empty_cells) - invalid_cells)
 
             columns.append(
                 ColumnStructure(
