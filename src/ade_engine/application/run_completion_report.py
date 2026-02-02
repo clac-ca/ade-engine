@@ -51,6 +51,7 @@ from ade_engine.models.run import RunError, RunStatus
 from ade_engine.models.table import TableRegion, TableResult
 
 _SEVERITY_ORDER: dict[str, int] = {"info": 0, "warning": 1, "error": 2}
+_ISSUE_PREFIX = "__ade_issue__"
 
 
 def _rfc3339_utc(ts: datetime) -> str:
@@ -345,6 +346,8 @@ class RunCompletionReportBuilder:
         scores_by_column: dict[int, dict[str, float]] = dict(getattr(table, "column_scores", {}) or {})
         duplicate_unmapped: set[int] = set(getattr(table, "duplicate_unmapped_indices", set()) or set())
 
+        invalid_by_field, validated_row_count = self._invalid_cells_by_field(table)
+
         empty_cols = 0
         non_empty_cells_total = 0
         columns: list[ColumnStructure] = []
@@ -380,11 +383,18 @@ class RunCompletionReportBuilder:
             else:
                 unmapped_count += 1
 
+            valid_cells = None
+            if validated_row_count is not None and mapping.status == "mapped" and mapping.field is not None:
+                invalid_cells = invalid_by_field.get(mapping.field)
+                if invalid_cells is not None:
+                    valid_cells = max(0, validated_row_count - invalid_cells)
+
             columns.append(
                 ColumnStructure(
                     index=int(col.index),
                     header=header,
                     non_empty_cells=int(non_empty_cells),
+                    valid_cells=valid_cells,
                     mapping=mapping,
                 )
             )
@@ -558,6 +568,23 @@ class RunCompletionReportBuilder:
             issues_by_severity={k: int(v) for k, v in by_sev.items()} if issues_total else {},
             max_severity=_max_severity(by_sev),
         )
+
+    def _invalid_cells_by_field(self, table: TableResult) -> tuple[dict[str, int], int | None]:
+        df = getattr(table, "table", None)
+        if not isinstance(df, pl.DataFrame) or df.height == 0:
+            return {}, None
+
+        invalid: dict[str, int] = {}
+        for col in df.columns:
+            if not col.startswith(_ISSUE_PREFIX):
+                continue
+            field = col[len(_ISSUE_PREFIX) :]
+            if not field:
+                continue
+            count = df.get_column(col).is_not_null().sum()
+            invalid[field] = int(count or 0)
+
+        return invalid, int(df.height)
 
     # ------------------------------------------------------------------
     # Rollups
