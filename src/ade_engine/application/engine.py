@@ -141,6 +141,13 @@ class Engine:
                         data={"sheet_count": len(source_wb.sheetnames)},
                     )
 
+                    active_sheet_name: str | None = None
+                    try:
+                        if source_wb.active is not None:
+                            active_sheet_name = str(source_wb.active.title)
+                    except Exception:
+                        active_sheet_name = None
+
                     registry.run_hooks(
                         HookName.ON_WORKBOOK_START,
                         settings=self.settings,
@@ -160,12 +167,25 @@ class Engine:
                         sheet = source_wb[sheet_name]
                         out_sheet = output_wb.create_sheet(title=sheet_name)
                         sheet_metadata = {**metadata, "sheet_index": sheet_index}
+                        is_active_sheet = None
+                        if active_sheet_name is not None:
+                            is_active_sheet = sheet_name == active_sheet_name
 
                         run_logger.event(
                             "sheet.started",
                             message="Sheet started",
                             data={"sheet_name": sheet_name, "sheet_index": sheet_index},
                         )
+
+                        if report_builder is not None:
+                            try:
+                                report_builder.record_sheet_meta(
+                                    sheet_index=sheet_index,
+                                    sheet_name=sheet_name,
+                                    is_active_sheet=is_active_sheet,
+                                )
+                            except Exception:
+                                run_logger.exception("Failed to record sheet metadata for engine.run.completed")
 
                         registry.run_hooks(
                             HookName.ON_SHEET_START,
