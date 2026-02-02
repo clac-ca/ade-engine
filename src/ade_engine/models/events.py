@@ -535,6 +535,7 @@ class SheetSummary(StrictModel):
     validation: Validation
     fields: list[FieldSummary] = Field(default_factory=list)
     scan: SheetScan | None = None
+    is_active_sheet: bool | None = None
     tables: list[TableSummary] = Field(default_factory=list)
 
     @model_validator(mode="after")

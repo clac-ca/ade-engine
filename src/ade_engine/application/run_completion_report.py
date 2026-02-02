@@ -122,6 +122,7 @@ def _max_severity(issues_by_severity: dict[str, int]) -> str | None:
 class _SheetAccum:
     index: int
     name: str
+    is_active_sheet: bool | None = None
     scan: dict[str, Any] | None = None
     tables: list[TableResult] = field(default_factory=list)
 
@@ -150,6 +151,13 @@ class RunCompletionReportBuilder:
             sheet = _SheetAccum(index=sheet_index, name=sheet_name)
             self._workbook.sheets[sheet_index] = sheet
         sheet.scan = dict(scan)
+
+    def record_sheet_meta(self, *, sheet_index: int, sheet_name: str, is_active_sheet: bool | None) -> None:
+        sheet = self._workbook.sheets.get(sheet_index)
+        if sheet is None:
+            sheet = _SheetAccum(index=sheet_index, name=sheet_name)
+            self._workbook.sheets[sheet_index] = sheet
+        sheet.is_active_sheet = is_active_sheet
 
     def record_table(self, table: TableResult) -> None:
         sheet_index = int(getattr(table, "sheet_index", 0) or 0)
@@ -305,6 +313,7 @@ class RunCompletionReportBuilder:
             validation=validation,
             fields=fields,
             scan=scan,
+            is_active_sheet=sheet.is_active_sheet,
             tables=tables,
         )
 
