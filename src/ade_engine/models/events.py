@@ -65,6 +65,24 @@ class SheetStartedPayloadV1(StrictPayloadV1):
     sheet_index: NonNegativeInt
 
 
+class InputNormalizedPayloadV1(StrictPayloadV1):
+    source_format: str
+    normalized_format: Literal["workbook"]
+    adapter: str
+    warnings: list[str] = Field(default_factory=list)
+
+
+class InputPdfTablesDetectedPayloadV1(StrictPayloadV1):
+    page_count: NonNegativeInt
+    table_count: NonNegativeInt
+    adapter: str
+
+
+class InputNormalizationFailedPayloadV1(StrictPayloadV1):
+    source_format: str
+    error: str
+
+
 class SheetTablesDetectedPayloadV1(StrictPayloadV1):
     sheet_name: str
     sheet_index: NonNegativeInt
@@ -617,6 +635,9 @@ ENGINE_EVENT_SCHEMAS: dict[str, PayloadModel] = {
     f"{ENGINE_NAMESPACE}.run.completed": RunCompletedPayloadV1,
     f"{ENGINE_NAMESPACE}.workbook.started": WorkbookStartedPayloadV1,
     f"{ENGINE_NAMESPACE}.sheet.started": SheetStartedPayloadV1,
+    f"{ENGINE_NAMESPACE}.input.normalized": InputNormalizedPayloadV1,
+    f"{ENGINE_NAMESPACE}.input.pdf.tables_detected": InputPdfTablesDetectedPayloadV1,
+    f"{ENGINE_NAMESPACE}.input.normalization_failed": InputNormalizationFailedPayloadV1,
     f"{ENGINE_NAMESPACE}.sheet.tables_detected": SheetTablesDetectedPayloadV1,
     f"{ENGINE_NAMESPACE}.table.detected": TableDetectedPayloadV1,
     f"{ENGINE_NAMESPACE}.table.extracted": TableExtractedPayloadV1,

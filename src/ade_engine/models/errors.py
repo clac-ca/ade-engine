@@ -15,6 +15,10 @@ class InputError(AdeEngineError):
     """Raised when source files or sheets are unusable."""
 
 
+class InputNormalizationError(InputError):
+    """Raised when source input cannot be normalized into a workbook."""
+
+
 class HookError(AdeEngineError):
     """Raised when hooks fail during execution."""
 
@@ -31,6 +35,7 @@ __all__ = [
     "AdeEngineError",
     "ConfigError",
     "InputError",
+    "InputNormalizationError",
     "HookError",
     "PipelineError",
 ]

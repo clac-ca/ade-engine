@@ -11,6 +11,10 @@ def test_collect_input_files_includes_supported_nested_inputs(tmp_path):
 
     supported = nested / "file.xlsx"
     supported.write_text("data")
+    supported_xls = nested / "legacy.xls"
+    supported_xls.write_text("data")
+    supported_pdf = nested / "report.pdf"
+    supported_pdf.write_text("data")
     (nested / "ignore.txt").write_text("skip")
 
     collected = collect_input_files(
@@ -21,7 +25,7 @@ def test_collect_input_files_includes_supported_nested_inputs(tmp_path):
         settings=Settings(),
     )
 
-    assert collected == [supported]
+    assert collected == [supported, supported_xls, supported_pdf]
 
 
 def test_collect_input_files_allows_user_include_globs(tmp_path):

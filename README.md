@@ -1,6 +1,6 @@
 # ADE Engine (CLI)
 
-Lightweight, configurable engine for normalizing Excel/CSV workbooks. This README is a fast path to install, scaffold a config package, and run single/batch jobs.
+Lightweight, configurable engine for normalizing spreadsheet and tabular-document inputs. This README is a fast path to install, scaffold a config package, and run single/batch jobs.
 
 ## Requirements
 
@@ -15,6 +15,12 @@ Lightweight, configurable engine for normalizing Excel/CSV workbooks. This READM
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+```
+
+### Optional adapters for `.xls` and `.pdf`
+
+```bash
+pip install -e ".[input-adapters]"
 ```
 
 ### From this repo (uv)
@@ -65,6 +71,9 @@ Notes:
 - `--config-package` can point to your generated folder (e.g., `my-config`) or any config package path; it is required unless set via `ADE_ENGINE_CONFIG_PACKAGE` or `settings.toml`.
 - `process batch --include` acts as an allowlist; if provided, only matching files run. `--exclude` patterns always prune recursively.
 - `process file` requires either `--output` or `--output-dir` (mutually exclusive).
+- Supported input extensions by default: `.xlsx`, `.xlsm`, `.csv`, `.xls`, `.pdf`.
+- `.xls` and `.pdf` ingestion requires optional adapters (`xlrd`, `pdfplumber`).
+- PDF support is table-extraction only (no OCR).
 
 ## Commands
 

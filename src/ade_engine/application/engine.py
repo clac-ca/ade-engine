@@ -17,7 +17,7 @@ from ade_engine.infrastructure.io.workbook import (
 from ade_engine.infrastructure.observability.context import create_run_logger_context
 from ade_engine.infrastructure.observability.logger import RunLogger
 from ade_engine.infrastructure.settings import Settings
-from ade_engine.models.errors import ConfigError, HookError, InputError, PipelineError
+from ade_engine.models.errors import ConfigError, HookError, InputError, InputNormalizationError, PipelineError
 from ade_engine.models.extension_contexts import HookName
 from ade_engine.models.run import RunError, RunErrorCode, RunRequest, RunResult, RunStatus
 from ade_engine.application.pipeline.pipeline import Pipeline
@@ -132,103 +132,137 @@ class Engine:
                     report_builder=report_builder,
                 )
 
-                with open_source_workbook(plan.request.input_file) as source_wb:
-                    output_wb = create_output_workbook()
-
-                    run_logger.event(
-                        "workbook.started",
-                        message="Workbook started",
-                        data={"sheet_count": len(source_wb.sheetnames)},
-                    )
-
-                    active_sheet_name: str | None = None
-                    try:
-                        if source_wb.active is not None:
-                            active_sheet_name = str(source_wb.active.title)
-                    except Exception:
-                        active_sheet_name = None
-
-                    registry.run_hooks(
-                        HookName.ON_WORKBOOK_START,
-                        settings=self.settings,
-                        state=state,
-                        metadata=metadata,
-                        input_file_name=plan.request.input_file.name,
-                        source_workbook=source_wb,
-                        logger=run_logger,
-                    )
-
-                    sheet_names = resolve_sheet_names(
-                        source_wb,
-                        plan.request.input_sheets,
-                        active_only=plan.request.active_sheet_only,
-                    )
-                    for sheet_index, sheet_name in enumerate(sheet_names):
-                        sheet = source_wb[sheet_name]
-                        out_sheet = output_wb.create_sheet(title=sheet_name)
-                        sheet_metadata = {**metadata, "sheet_index": sheet_index}
-                        is_active_sheet = None
-                        if active_sheet_name is not None:
-                            is_active_sheet = sheet_name == active_sheet_name
+                try:
+                    workbook_context = open_source_workbook(plan.request.input_file, settings=self.settings)
+                    with workbook_context as (source_wb, normalization):
+                        output_wb = create_output_workbook()
 
                         run_logger.event(
-                            "sheet.started",
-                            message="Sheet started",
-                            data={"sheet_name": sheet_name, "sheet_index": sheet_index},
+                            "input.normalized",
+                            message="Input normalized",
+                            data={
+                                "source_format": normalization.source_format,
+                                "normalized_format": normalization.normalized_format,
+                                "adapter": normalization.adapter,
+                                "warnings": list(normalization.warnings),
+                            },
+                        )
+                        if normalization.source_format == ".pdf":
+                            run_logger.event(
+                                "input.pdf.tables_detected",
+                                message="PDF table extraction completed",
+                                data={
+                                    "page_count": normalization.page_count or 0,
+                                    "table_count": normalization.table_count or 0,
+                                    "adapter": normalization.adapter,
+                                },
+                            )
+
+                        run_logger.event(
+                            "workbook.started",
+                            message="Workbook started",
+                            data={"sheet_count": len(source_wb.sheetnames)},
                         )
 
-                        if report_builder is not None:
-                            try:
-                                report_builder.record_sheet_meta(
-                                    sheet_index=sheet_index,
-                                    sheet_name=sheet_name,
-                                    is_active_sheet=is_active_sheet,
-                                )
-                            except Exception:
-                                run_logger.exception("Failed to record sheet metadata for engine.run.completed")
+                        active_sheet_name: str | None = None
+                        try:
+                            if source_wb.active is not None:
+                                active_sheet_name = str(source_wb.active.title)
+                        except Exception:
+                            active_sheet_name = None
 
                         registry.run_hooks(
-                            HookName.ON_SHEET_START,
+                            HookName.ON_WORKBOOK_START,
                             settings=self.settings,
                             state=state,
-                            metadata=sheet_metadata,
+                            metadata=metadata,
                             input_file_name=plan.request.input_file.name,
                             source_workbook=source_wb,
-                            source_sheet=sheet,
                             logger=run_logger,
                         )
 
-                        tables = pipeline.process_sheet(
-                            sheet=sheet,
-                            output_sheet=out_sheet,
-                            state=state,
-                            metadata=sheet_metadata,
-                            input_file_name=plan.request.input_file.name,
+                        sheet_names = resolve_sheet_names(
+                            source_wb,
+                            plan.request.input_sheets,
+                            active_only=plan.request.active_sheet_only,
                         )
+                        for sheet_index, sheet_name in enumerate(sheet_names):
+                            sheet = source_wb[sheet_name]
+                            out_sheet = output_wb.create_sheet(title=sheet_name)
+                            sheet_metadata = {**metadata, "sheet_index": sheet_index}
+                            is_active_sheet = None
+                            if active_sheet_name is not None:
+                                is_active_sheet = sheet_name == active_sheet_name
+
+                            run_logger.event(
+                                "sheet.started",
+                                message="Sheet started",
+                                data={"sheet_name": sheet_name, "sheet_index": sheet_index},
+                            )
+
+                            if report_builder is not None:
+                                try:
+                                    report_builder.record_sheet_meta(
+                                        sheet_index=sheet_index,
+                                        sheet_name=sheet_name,
+                                        is_active_sheet=is_active_sheet,
+                                    )
+                                except Exception:
+                                    run_logger.exception("Failed to record sheet metadata for engine.run.completed")
+
+                            registry.run_hooks(
+                                HookName.ON_SHEET_START,
+                                settings=self.settings,
+                                state=state,
+                                metadata=sheet_metadata,
+                                input_file_name=plan.request.input_file.name,
+                                source_workbook=source_wb,
+                                source_sheet=sheet,
+                                logger=run_logger,
+                            )
+
+                            tables = pipeline.process_sheet(
+                                sheet=sheet,
+                                output_sheet=out_sheet,
+                                state=state,
+                                metadata=sheet_metadata,
+                                input_file_name=plan.request.input_file.name,
+                            )
+
+                            registry.run_hooks(
+                                HookName.ON_SHEET_END,
+                                settings=self.settings,
+                                state=state,
+                                metadata=sheet_metadata,
+                                input_file_name=plan.request.input_file.name,
+                                output_workbook=output_wb,
+                                output_sheet=out_sheet,
+                                tables=tables,
+                                logger=run_logger,
+                            )
 
                         registry.run_hooks(
-                            HookName.ON_SHEET_END,
+                            HookName.ON_WORKBOOK_BEFORE_SAVE,
                             settings=self.settings,
                             state=state,
-                            metadata=sheet_metadata,
+                            metadata=metadata,
                             input_file_name=plan.request.input_file.name,
                             output_workbook=output_wb,
-                            output_sheet=out_sheet,
-                            tables=tables,
                             logger=run_logger,
                         )
-
-                    registry.run_hooks(
-                        HookName.ON_WORKBOOK_BEFORE_SAVE,
-                        settings=self.settings,
-                        state=state,
-                        metadata=metadata,
-                        input_file_name=plan.request.input_file.name,
-                        output_workbook=output_wb,
-                        logger=run_logger,
+                        output_wb.save(plan.output_path)
+                        output_written = True
+                except InputNormalizationError as exc:
+                    run_logger.event(
+                        "input.normalization_failed",
+                        message="Input normalization failed",
+                        level=logging.ERROR,
+                        data={
+                            "source_format": plan.request.input_file.suffix.lower() or "",
+                            "error": str(exc),
+                        },
                     )
-                    output_wb.save(plan.output_path)
-                    output_written = True
+                    raise
 
                 status = RunStatus.SUCCEEDED
             except (ConfigError, InputError, HookError, PipelineError) as exc:

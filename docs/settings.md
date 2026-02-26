@@ -53,9 +53,14 @@ They do not affect transforms or validators, which always process all rows.
 
 ## File discovery
 
-- `supported_file_extensions: tuple[str, ...]` — extensions considered when scanning directories for inputs. Default `(".xlsx", ".xlsm", ".csv")`.
+- `supported_file_extensions: tuple[str, ...]` — extensions considered when scanning directories for inputs. Default `(".xlsx", ".xlsm", ".csv", ".xls", ".pdf")`.
   - Can be set in TOML as an array: `[".xlsx", ".csv"]`
   - Can be set via env as a comma-separated string: `ADE_ENGINE_SUPPORTED_FILE_EXTENSIONS=.xlsx,.csv`
+
+## PDF ingestion
+
+- `pdf_table_extractor: "auto" | "pdfplumber"` — table extraction adapter for `.pdf` inputs. Default `auto`.
+- `pdf_fail_if_no_tables: bool` — fail run when no tabular data is detected in PDF input. Default `true`.
 
 ## TOML example
 
@@ -70,5 +75,7 @@ log_format = "ndjson"
 log_level = "INFO"
 max_empty_rows_run = 2000
 max_empty_cols_run = 200
-supported_file_extensions = [".xlsx", ".csv"]
+supported_file_extensions = [".xlsx", ".csv", ".xls", ".pdf"]
+pdf_table_extractor = "auto"
+pdf_fail_if_no_tables = true
 ```
