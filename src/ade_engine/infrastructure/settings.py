@@ -109,7 +109,9 @@ class Settings(BaseSettings):
     merge_stacked_headers: bool = Field(default=True)
 
     # File discovery
-    supported_file_extensions: tuple[str, ...] = Field(default=(".xlsx", ".xlsm", ".csv"))
+    supported_file_extensions: tuple[str, ...] = Field(default=(".xlsx", ".xlsm", ".csv", ".xls", ".pdf"))
+    pdf_table_extractor: Literal["auto", "pdfplumber"] = Field(default="auto")
+    pdf_fail_if_no_tables: bool = Field(default=True)
 
     @field_validator("log_level", mode="before")
     @classmethod

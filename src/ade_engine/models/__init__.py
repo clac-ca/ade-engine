@@ -3,6 +3,7 @@ from ade_engine.models.errors import (
     ConfigError,
     HookError,
     InputError,
+    InputNormalizationError,
     PipelineError,
 )
 from ade_engine.models.events import (
@@ -35,6 +36,7 @@ from ade_engine.models.extension_outputs import (
     ColumnDetectorResult,
     RowDetectorResult,
 )
+from ade_engine.models.input_normalization import InputNormalizationMetadata
 from ade_engine.models.run import RunError, RunErrorCode, RunRequest, RunResult, RunStatus
 from ade_engine.models.table import MappedColumn, SourceColumn, TableRegion, TableResult
 
@@ -43,6 +45,7 @@ __all__ = [
     "ConfigError",
     "HookError",
     "InputError",
+    "InputNormalizationError",
     "PipelineError",
     "ENGINE_NAMESPACE",
     "CONFIG_NAMESPACE",
@@ -68,6 +71,7 @@ __all__ = [
     "WorkbookBeforeSaveHookContext",
     "ColumnDetectorResult",
     "RowDetectorResult",
+    "InputNormalizationMetadata",
     "RunError",
     "RunErrorCode",
     "RunRequest",
