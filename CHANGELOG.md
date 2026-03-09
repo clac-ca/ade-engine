@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/clac-ca/ade-engine/compare/v1.8.1...v1.9.0) (2026-03-09)
+
+
+### Features
+
+* **pipeline:** implement merging of tables with type coercion and error handling ([#18](https://github.com/clac-ca/ade-engine/issues/18)) ([6539209](https://github.com/clac-ca/ade-engine/commit/653920985f3f422f29f262edc8701a5a313c3ce6))
+
 ## [1.8.1](https://github.com/clac-ca/ade-engine/compare/v1.8.0...v1.8.1) (2026-03-09)
 
 
