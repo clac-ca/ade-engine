@@ -25,12 +25,19 @@ class _FakeSheet:
         rows: list[list[_FakeCell]],
         *,
         merged_cells: list[tuple[int, int, int, int]] | None = None,
+        visibility: int | None = None,
+        sheet_visible: int = 0,
+        sheet_selected: int = 0,
     ) -> None:
         self.name = name
         self._rows = rows
         self.nrows = len(rows)
         self.ncols = max((len(row) for row in rows), default=0)
         self.merged_cells = merged_cells or []
+        if visibility is not None:
+            self.visibility = visibility
+        self.sheet_visible = sheet_visible
+        self.sheet_selected = sheet_selected
 
     def cell(self, row_index: int, col_index: int) -> _FakeCell:
         if row_index >= self.nrows or col_index >= len(self._rows[row_index]):
@@ -57,6 +64,7 @@ class _FakeBook:
         self.nsheets = len(sheets)
         self.datemode = datemode
         self.sheet_visibility = sheet_visibility or [0] * len(sheets)
+        self._sheet_visibility = self.sheet_visibility
 
     def sheet_by_index(self, index: int) -> _FakeSheet:
         return self._sheets[index]
@@ -98,8 +106,9 @@ def test_convert_xlrd_book_to_openpyxl_preserves_visibility_merges_and_cell_type
             ],
         ],
         merged_cells=[(0, 1, 0, 2)],
+        sheet_visible=1,
     )
-    hidden_sheet = _FakeSheet("Hidden", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "secret")]])
+    hidden_sheet = _FakeSheet("Hidden", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "secret")]], visibility=1)
     book = _FakeBook([visible_sheet, hidden_sheet], sheet_visibility=[0, 1])
 
     workbook = _convert_xlrd_book_to_openpyxl(book)
@@ -163,6 +172,83 @@ def test_convert_xlrd_book_to_openpyxl_uses_row_arrays_when_cell_access_breaks()
 
     assert workbook.active["A1"].value == "Header"
     assert workbook.active["A2"].value == 4
+
+
+def test_convert_xlrd_book_to_openpyxl_uses_sheet_visible_for_active_sheet():
+    xlrd = pytest.importorskip("xlrd")
+
+    book = _FakeBook(
+        [
+            _FakeSheet("First", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "a")]]),
+            _FakeSheet("Second", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "b")]], sheet_visible=1),
+            _FakeSheet("Hidden", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "c")]], visibility=1, sheet_visible=1),
+        ]
+    )
+
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+
+    assert workbook.active.title == "Second"
+    assert resolve_sheet_names(workbook, requested=None, active_only=True) == ["Second"]
+
+
+def test_convert_xlrd_book_to_openpyxl_falls_back_to_first_visible_sheet():
+    xlrd = pytest.importorskip("xlrd")
+
+    book = _FakeBook(
+        [
+            _FakeSheet("First", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "a")]]),
+            _FakeSheet("Hidden", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "b")]], visibility=1),
+            _FakeSheet("Third", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "c")]], sheet_selected=1),
+        ]
+    )
+
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+
+    assert workbook.active.title == "Third"
+
+    book = _FakeBook(
+        [
+            _FakeSheet("First", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "a")]]),
+            _FakeSheet("Hidden", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "b")]], visibility=1),
+            _FakeSheet("Third", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "c")]]),
+        ]
+    )
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+
+    assert workbook.active.title == "First"
+
+
+def test_resolve_sheet_names_for_xls_uses_original_names_when_openpyxl_renames_duplicates():
+    xlrd = pytest.importorskip("xlrd")
+
+    book = _FakeBook(
+        [
+            _FakeSheet("Sheet", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "a")]]),
+            _FakeSheet("sheet", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "b")]]),
+        ]
+    )
+
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+
+    assert workbook.sheetnames == ["Sheet", "sheet1"]
+    assert resolve_sheet_names(workbook, requested=["sheet"]) == ["sheet1"]
+
+
+def test_resolve_sheet_names_for_xls_excludes_hidden_requested_sheets():
+    xlrd = pytest.importorskip("xlrd")
+
+    book = _FakeBook(
+        [
+            _FakeSheet("Visible", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "a")]]),
+            _FakeSheet("Hidden", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "b")]], visibility=1),
+        ]
+    )
+
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+
+    assert resolve_sheet_names(workbook, requested=None) == ["Visible"]
+    with pytest.raises(InputError, match="Worksheet\\(s\\) not found: Hidden"):
+        resolve_sheet_names(workbook, requested=["Hidden"])
 
 
 def test_resolve_sheet_names_rejects_active_only_when_no_visible_sheets():
