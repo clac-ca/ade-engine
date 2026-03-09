@@ -37,6 +37,19 @@ class _FakeSheet:
             return _FakeCell(0, "")
         return self._rows[row_index][col_index]
 
+    def row_len(self, row_index: int) -> int:
+        return len(self._rows[row_index])
+
+    def row_types(self, row_index: int, start_colx: int = 0, end_colx: int | None = None) -> list[int]:
+        row = self._rows[row_index]
+        end = len(row) if end_colx is None else end_colx
+        return [cell.ctype for cell in row[start_colx:end]]
+
+    def row_values(self, row_index: int, start_colx: int = 0, end_colx: int | None = None) -> list[object]:
+        row = self._rows[row_index]
+        end = len(row) if end_colx is None else end_colx
+        return [cell.value for cell in row[start_colx:end]]
+
 
 class _FakeBook:
     def __init__(self, sheets: list[_FakeSheet], *, datemode: int = 0, sheet_visibility: list[int] | None = None) -> None:
@@ -125,6 +138,31 @@ def test_load_source_workbook_reads_xls_into_workbook(tmp_path: Path):
     assert workbook.active["A1"].value == "Header"
     assert workbook.active["A2"].value == "USER@Example.com"
     workbook.close()
+
+
+def test_convert_xlrd_book_to_openpyxl_uses_row_arrays_when_cell_access_breaks():
+    xlrd = pytest.importorskip("xlrd")
+
+    class _BrokenCellSheet(_FakeSheet):
+        def cell(self, row_index: int, col_index: int) -> _FakeCell:
+            raise IndexError("array index out of range")
+
+    book = _FakeBook(
+        [
+            _BrokenCellSheet(
+                "Visible",
+                rows=[
+                    [_FakeCell(xlrd.XL_CELL_TEXT, "Header")],
+                    [_FakeCell(xlrd.XL_CELL_NUMBER, 4.0)],
+                ],
+            )
+        ]
+    )
+
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+
+    assert workbook.active["A1"].value == "Header"
+    assert workbook.active["A2"].value == 4
 
 
 def test_resolve_sheet_names_rejects_active_only_when_no_visible_sheets():
