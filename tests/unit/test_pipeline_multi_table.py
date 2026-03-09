@@ -4,12 +4,13 @@ from openpyxl import Workbook
 import polars as pl
 import pytest
 
-from ade_engine.application.pipeline.pipeline import Pipeline
+from ade_engine.application.pipeline.pipeline import Pipeline, _merge_tables_in_sheet
 from ade_engine.extensions.registry import Registry
 from ade_engine.infrastructure.observability.logger import NullLogger
 from ade_engine.infrastructure.settings import Settings
 from ade_engine.models.errors import PipelineError
 from ade_engine.models.extension_contexts import FieldDef, RowKind
+from ade_engine.models.table import SourceColumn, TableRegion, TableResult
 
 
 def test_process_sheet_renders_multiple_tables_with_blank_row():
@@ -520,3 +521,58 @@ def test_on_table_written_receives_merged_metadata_for_merged_tables():
     assert source_headers["Email"] == mapped_indices["email"]
     assert source_headers["Name"] == mapped_indices["name"]
     assert state["source_region"] == "A1:A5"
+
+
+def test_merge_tables_in_sheet_preserves_integer_supertype_without_float_widening():
+    table_a = TableResult(
+        sheet_name="Sheet1",
+        table=pl.DataFrame({"member_id": pl.Series("member_id", [1], dtype=pl.Int32)}),
+        source_region=TableRegion(min_row=1, min_col=1, max_row=2, max_col=1),
+        source_columns=[SourceColumn(index=0, header="Member ID", values=[1])],
+        table_index=0,
+        sheet_index=0,
+        row_count=1,
+    )
+    table_b = TableResult(
+        sheet_name="Sheet1",
+        table=pl.DataFrame({"member_id": pl.Series("member_id", [2], dtype=pl.Int64)}),
+        source_region=TableRegion(min_row=4, min_col=1, max_row=5, max_col=1),
+        source_columns=[SourceColumn(index=0, header="Member ID", values=[2])],
+        table_index=1,
+        sheet_index=0,
+        row_count=1,
+    )
+
+    merged = _merge_tables_in_sheet([table_a, table_b])[0]
+
+    assert merged.table.schema["member_id"] == pl.Int64
+    assert merged.table.get_column("member_id").to_list() == [1, 2]
+
+
+def test_merge_tables_in_sheet_preserves_duplicate_unmapped_indices():
+    table_a = TableResult(
+        sheet_name="Sheet1",
+        table=pl.DataFrame({"Notes": ["alpha"]}),
+        source_region=TableRegion(min_row=1, min_col=1, max_row=2, max_col=1),
+        source_columns=[SourceColumn(index=0, header="Notes", values=["alpha"])],
+        table_index=0,
+        sheet_index=0,
+        unmapped_columns=[SourceColumn(index=0, header="Notes", values=["alpha"])],
+        duplicate_unmapped_indices={0},
+        row_count=1,
+    )
+    table_b = TableResult(
+        sheet_name="Sheet1",
+        table=pl.DataFrame({"Notes": ["beta"]}),
+        source_region=TableRegion(min_row=4, min_col=1, max_row=5, max_col=1),
+        source_columns=[SourceColumn(index=0, header="Notes", values=["beta"])],
+        table_index=1,
+        sheet_index=0,
+        unmapped_columns=[SourceColumn(index=0, header="Notes", values=["beta"])],
+        duplicate_unmapped_indices={0},
+        row_count=1,
+    )
+
+    merged = _merge_tables_in_sheet([table_a, table_b])[0]
+
+    assert merged.duplicate_unmapped_indices == {0}

@@ -192,6 +192,50 @@ def _is_float_dtype(dtype: pl.DataType) -> bool:
     return dtype in {pl.Float32, pl.Float64}
 
 
+def _integer_dtype_width(dtype: pl.DataType) -> int:
+    widths = {
+        pl.Int8: 8,
+        pl.Int16: 16,
+        pl.Int32: 32,
+        pl.Int64: 64,
+        pl.UInt8: 8,
+        pl.UInt16: 16,
+        pl.UInt32: 32,
+        pl.UInt64: 64,
+    }
+    return widths[dtype]
+
+
+def _is_signed_integer_dtype(dtype: pl.DataType) -> bool:
+    return dtype in {pl.Int8, pl.Int16, pl.Int32, pl.Int64}
+
+
+def _resolve_integer_supertype(dtypes: set[pl.DataType]) -> pl.DataType:
+    if all(_is_signed_integer_dtype(dtype) for dtype in dtypes):
+        widest = max(_integer_dtype_width(dtype) for dtype in dtypes)
+        return {8: pl.Int8, 16: pl.Int16, 32: pl.Int32, 64: pl.Int64}[widest]
+
+    if all(not _is_signed_integer_dtype(dtype) for dtype in dtypes):
+        widest = max(_integer_dtype_width(dtype) for dtype in dtypes)
+        return {8: pl.UInt8, 16: pl.UInt16, 32: pl.UInt32, 64: pl.UInt64}[widest]
+
+    widest_unsigned = max(_integer_dtype_width(dtype) for dtype in dtypes if not _is_signed_integer_dtype(dtype))
+    widest_signed = max(_integer_dtype_width(dtype) for dtype in dtypes if _is_signed_integer_dtype(dtype))
+
+    signed_candidates = (
+        (8, pl.Int8),
+        (16, pl.Int16),
+        (32, pl.Int32),
+        (64, pl.Int64),
+    )
+    required_signed_width = max(widest_signed, min(64, widest_unsigned * 2))
+    for width, dtype in signed_candidates:
+        if width >= required_signed_width:
+            return dtype
+
+    raise PipelineError("Failed to merge in-sheet tables: no safe integer supertype for signed/unsigned mix")
+
+
 def _dtype_sort_key(dtype: pl.DataType) -> str:
     return repr(dtype)
 
@@ -216,6 +260,15 @@ def _resolve_merged_column_dtype(column_name: str, tables: list[TableResult]) ->
     unique_concrete = {dtype for dtype in concrete}
     if len(unique_concrete) == 1:
         return next(iter(unique_concrete))
+
+    if all(_is_integer_dtype(dtype) for dtype in unique_concrete):
+        try:
+            return _resolve_integer_supertype(unique_concrete)
+        except PipelineError as exc:
+            dtype_list = ", ".join(sorted({_dtype_sort_key(dtype) for dtype in observed}))
+            raise PipelineError(
+                f"Failed to merge in-sheet tables: incompatible dtypes for column '{column_name}' ({dtype_list})"
+            ) from exc
 
     if all(_is_integer_dtype(dtype) or _is_float_dtype(dtype) for dtype in unique_concrete):
         return pl.Float64
@@ -354,10 +407,14 @@ def _build_merged_table_result(tables: list[TableResult], merged_df: pl.DataFram
     mapped_columns = _build_merged_mapped_columns(tables=tables, merged_df=merged_df)
     mapped_names = {column.field_name for column in mapped_columns}
     unmapped_columns = [column for column in source_columns if merged_df.columns[column.index] not in mapped_names]
+    duplicate_unmapped_names: set[str] = set()
+    for table_result in tables:
+        for source_index in table_result.duplicate_unmapped_indices:
+            if 0 <= source_index < len(table_result.table.columns):
+                duplicate_unmapped_names.add(table_result.table.columns[source_index])
+
     duplicate_unmapped_indices = {
-        source_column.index
-        for source_column in unmapped_columns
-        if source_column.index < len(merged_df.columns) and merged_df.columns[source_column.index] in mapped_names
+        index for index, column_name in enumerate(merged_df.columns) if column_name in duplicate_unmapped_names
     }
 
     return TableResult(
