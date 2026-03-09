@@ -7,6 +7,7 @@ import math
 from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import openpyxl
@@ -87,7 +88,7 @@ def _convert_xlrd_book_to_openpyxl(book: Any) -> Workbook:
             visible_sheet_index = sheet_index
 
         for row_index in range(sheet.nrows):
-            row_values = [_convert_xls_cell_value(book, sheet.cell(row_index, col_index)) for col_index in range(sheet.ncols)]
+            row_values = [_convert_xls_cell_value(book, cell) for cell in _iter_xls_row_cells(sheet, row_index)]
             ws.append(row_values)
 
         for merged_range in getattr(sheet, "merged_cells", ()):
@@ -114,6 +115,22 @@ def _map_sheet_visibility(visibility: int) -> str:
     if visibility == 2:
         return "veryHidden"
     return "visible"
+
+
+def _iter_xls_row_cells(sheet: Any, row_index: int) -> list[Any]:
+    row_len = getattr(sheet, "row_len", None)
+    row_types = getattr(sheet, "row_types", None)
+    row_values = getattr(sheet, "row_values", None)
+
+    if callable(row_len) and callable(row_types) and callable(row_values):
+        row_cell_types = row_types(row_index, 0, row_len(row_index))
+        row_cell_values = row_values(row_index, 0, row_len(row_index))
+        return [
+            SimpleNamespace(ctype=cell_type, value=cell_value)
+            for cell_type, cell_value in zip(row_cell_types, row_cell_values, strict=True)
+        ]
+
+    return [sheet.cell(row_index, col_index) for col_index in range(sheet.ncols)]
 
 
 def _convert_xls_cell_value(book: Any, cell: Any) -> Any:
