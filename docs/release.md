@@ -1,6 +1,6 @@
 # Release process
 
-This repo uses release-please to automate version bumps and GitHub Releases.
+This repo uses release-please single-package mode to automate version bumps and GitHub Releases.
 
 ## How it works
 
@@ -14,7 +14,8 @@ This repo uses release-please to automate version bumps and GitHub Releases.
 ## Version source of truth
 
 - `pyproject.toml` (`project.version`) is the canonical version.
-- The release PR keeps this value and `.release-please-manifest.json` in sync.
+- `release-please-config.json` defines the single package released from this repo.
+- The release PR keeps `pyproject.toml` in sync with the generated release version.
 
 ## Releasing
 
