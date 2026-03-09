@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/clac-ca/ade-engine/compare/v1.9.0...v1.9.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* preserve .xls sheet selection semantics ([#20](https://github.com/clac-ca/ade-engine/issues/20)) ([97b0ad6](https://github.com/clac-ca/ade-engine/commit/97b0ad6409355562a8adda6972e8cb35f5385112))
+
 ## [1.9.0](https://github.com/clac-ca/ade-engine/compare/v1.8.1...v1.9.0) (2026-03-09)
 
 
