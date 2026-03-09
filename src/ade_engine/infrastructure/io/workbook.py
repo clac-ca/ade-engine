@@ -17,24 +17,12 @@ from openpyxl import Workbook
 from ade_engine.models.errors import InputError
 
 _XLS_METADATA_ATTR = "_ade_xls_metadata"
-
-
-@dataclass(frozen=True)
-class _XlsSheetInfo:
-    original_name: str
-    converted_name: str
-    source_index: int
-    visibility: int
-    is_active: bool
-    is_selected: bool
+_XLS_ORIGINAL_NAME_ATTR = "_ade_xls_original_name"
 
 
 @dataclass(frozen=True)
 class _XlsWorkbookMetadata:
-    sheets: tuple[_XlsSheetInfo, ...]
-    source_to_converted: dict[str, str]
-    active_source_name: str | None
-    active_converted_name: str | None
+    is_converted_xls: bool = True
 
 
 def load_source_workbook(path: Path) -> Workbook:
@@ -99,11 +87,10 @@ def _convert_xlrd_book_to_openpyxl(book: Any) -> Workbook:
     visible_sheet_index: int | None = None
     selected_sheet_index: int | None = None
     active_sheet_index: int | None = None
-    sheet_infos: list[_XlsSheetInfo] = []
-
     for sheet_index in range(book.nsheets):
         sheet = book.sheet_by_index(sheet_index)
         ws = workbook.create_sheet(title=sheet.name)
+        setattr(ws, _XLS_ORIGINAL_NAME_ATTR, str(sheet.name))
 
         visibility = _get_xls_sheet_visibility(book, sheet, sheet_index)
         ws.sheet_state = _map_sheet_visibility(visibility)
@@ -116,17 +103,6 @@ def _convert_xlrd_book_to_openpyxl(book: Any) -> Workbook:
             active_sheet_index = sheet_index
         if selected_sheet_index is None and is_visible and is_selected:
             selected_sheet_index = sheet_index
-
-        sheet_infos.append(
-            _XlsSheetInfo(
-                original_name=str(sheet.name),
-                converted_name=str(ws.title),
-                source_index=sheet_index,
-                visibility=visibility,
-                is_active=is_active,
-                is_selected=is_selected,
-            )
-        )
 
         for row_index in range(sheet.nrows):
             row_values = [_convert_xls_cell_value(book, cell) for cell in _iter_xls_row_cells(sheet, row_index)]
@@ -155,7 +131,7 @@ def _convert_xlrd_book_to_openpyxl(book: Any) -> Workbook:
         resolved_active_index = 0
 
     workbook.active = resolved_active_index
-    _set_xls_workbook_metadata(workbook, sheet_infos, resolved_active_index)
+    _set_xls_workbook_metadata(workbook)
     return workbook
 
 
@@ -198,23 +174,11 @@ def _get_xls_sheet_visibility(book: Any, sheet: Any, sheet_index: int) -> int:
     return 0
 
 
-def _set_xls_workbook_metadata(workbook: Workbook, sheet_infos: list[_XlsSheetInfo], active_sheet_index: int) -> None:
-    active_source_name: str | None = None
-    active_converted_name: str | None = None
-    if 0 <= active_sheet_index < len(sheet_infos):
-        active_info = sheet_infos[active_sheet_index]
-        active_source_name = active_info.original_name
-        active_converted_name = active_info.converted_name
-
+def _set_xls_workbook_metadata(workbook: Workbook) -> None:
     setattr(
         workbook,
         _XLS_METADATA_ATTR,
-        _XlsWorkbookMetadata(
-            sheets=tuple(sheet_infos),
-            source_to_converted={info.original_name: info.converted_name for info in sheet_infos},
-            active_source_name=active_source_name,
-            active_converted_name=active_converted_name,
-        ),
+        _XlsWorkbookMetadata(),
     )
 
 
@@ -287,7 +251,7 @@ def resolve_sheet_names(
 
     xls_metadata = _get_xls_workbook_metadata(workbook)
     if xls_metadata is not None:
-        return _resolve_xls_sheet_names(xls_metadata, requested, active_only=active_only)
+        return _resolve_xls_sheet_names(workbook, requested, active_only=active_only)
 
     visible = [ws.title for ws in workbook.worksheets if getattr(ws, "sheet_state", "visible") == "visible"]
     if active_only:
@@ -315,37 +279,42 @@ def resolve_sheet_names(
 
 
 def _resolve_xls_sheet_names(
-    metadata: _XlsWorkbookMetadata,
+    workbook: Workbook,
     requested: list[str] | None,
     *,
     active_only: bool,
 ) -> list[str]:
-    visible_infos = [info for info in metadata.sheets if _map_sheet_visibility(info.visibility) == "visible"]
-    visible_original = [info.original_name for info in visible_infos]
-    visible_converted = [info.converted_name for info in visible_infos]
-
+    visible_sheets = [ws for ws in workbook.worksheets if getattr(ws, "sheet_state", "visible") == "visible"]
+    visible_titles = [ws.title for ws in visible_sheets]
     if active_only:
-        if not visible_infos:
+        if not visible_sheets:
             raise InputError("No visible worksheets available")
-        active_name = metadata.active_source_name
+        active = workbook.active
+        active_name = getattr(active, "title", None)
         if not active_name:
             raise InputError("Active worksheet is not available")
-        if active_name not in visible_original:
+        if active_name not in visible_titles:
             raise InputError(f"Active worksheet is hidden: {active_name}")
-        return [metadata.source_to_converted[active_name]]
+        return [active_name]
 
     if not requested:
-        return visible_converted
+        return visible_titles
 
     cleaned = [name.strip() for name in requested if isinstance(name, str) and name.strip()]
     unique_requested = list(dict.fromkeys(cleaned))
 
-    missing = [name for name in unique_requested if name not in visible_original]
+    visible_by_requested_name: dict[str, str] = {}
+    for ws in visible_sheets:
+        visible_by_requested_name[ws.title] = ws.title
+        visible_by_requested_name[str(getattr(ws, _XLS_ORIGINAL_NAME_ATTR, ws.title))] = ws.title
+
+    missing = [name for name in unique_requested if name not in visible_by_requested_name]
     if missing:
         raise InputError(f"Worksheet(s) not found: {', '.join(missing)}")
 
-    order_index = {info.original_name: idx for idx, info in enumerate(visible_infos)}
-    return [metadata.source_to_converted[name] for name in sorted(unique_requested, key=lambda n: order_index[n])]
+    order_index = {ws.title: idx for idx, ws in enumerate(visible_sheets)}
+    resolved = [visible_by_requested_name[name] for name in unique_requested]
+    return sorted(resolved, key=lambda n: order_index[n])
 
 
 __all__ = [

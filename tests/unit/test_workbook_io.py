@@ -251,6 +251,43 @@ def test_resolve_sheet_names_for_xls_excludes_hidden_requested_sheets():
         resolve_sheet_names(workbook, requested=["Hidden"])
 
 
+def test_resolve_sheet_names_for_xls_respects_renames_after_conversion():
+    xlrd = pytest.importorskip("xlrd")
+
+    book = _FakeBook(
+        [
+            _FakeSheet("Original", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "a")]]),
+            _FakeSheet("Second", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "b")]]),
+        ]
+    )
+
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+    workbook["Original"].title = "Renamed"
+
+    assert resolve_sheet_names(workbook, requested=["Original"]) == ["Renamed"]
+    assert resolve_sheet_names(workbook, requested=["Renamed"]) == ["Renamed"]
+
+
+def test_resolve_sheet_names_for_xls_respects_visibility_and_active_mutations_after_conversion():
+    xlrd = pytest.importorskip("xlrd")
+
+    book = _FakeBook(
+        [
+            _FakeSheet("First", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "a")]], sheet_visible=1),
+            _FakeSheet("Second", rows=[[_FakeCell(xlrd.XL_CELL_TEXT, "b")]]),
+        ]
+    )
+
+    workbook = _convert_xlrd_book_to_openpyxl(book)
+    workbook["First"].sheet_state = "hidden"
+    workbook.active = workbook["Second"]
+
+    assert resolve_sheet_names(workbook, requested=None) == ["Second"]
+    assert resolve_sheet_names(workbook, requested=None, active_only=True) == ["Second"]
+    with pytest.raises(InputError, match="Worksheet\\(s\\) not found: First"):
+        resolve_sheet_names(workbook, requested=["First"])
+
+
 def test_resolve_sheet_names_rejects_active_only_when_no_visible_sheets():
     workbook = Workbook()
     sheet = workbook.active
