@@ -15,8 +15,9 @@ from ade_engine.application.pipeline.validate import apply_validators
 from ade_engine.extensions.registry import Registry
 from ade_engine.infrastructure.observability.logger import RunLogger
 from ade_engine.infrastructure.settings import Settings
+from ade_engine.models.errors import PipelineError
 from ade_engine.models.extension_contexts import HookName
-from ade_engine.models.table import TableRegion, TableResult
+from ade_engine.models.table import MappedColumn, SourceColumn, TableRegion, TableResult
 
 
 def _stringify_cell(value: Any) -> str | None:
@@ -170,6 +171,210 @@ def _ordered_column_union(tables: list[TableResult]) -> list[str]:
     return ordered
 
 
+def _resolve_merged_column_order(tables: list[TableResult]) -> list[str]:
+    return _ordered_column_union(tables)
+
+
+def _is_integer_dtype(dtype: pl.DataType) -> bool:
+    return dtype in {
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+    }
+
+
+def _is_float_dtype(dtype: pl.DataType) -> bool:
+    return dtype in {pl.Float32, pl.Float64}
+
+
+def _dtype_sort_key(dtype: pl.DataType) -> str:
+    return repr(dtype)
+
+
+def _resolve_merged_column_dtype(column_name: str, tables: list[TableResult]) -> pl.DataType:
+    observed: list[pl.DataType] = []
+    concrete: list[pl.DataType] = []
+    for table_result in tables:
+        schema = table_result.table.schema
+        if column_name not in schema:
+            continue
+        dtype = schema[column_name]
+        observed.append(dtype)
+        if dtype != pl.Null:
+            concrete.append(dtype)
+
+    if not observed:
+        return pl.Null
+    if not concrete:
+        return pl.Null
+
+    unique_concrete = {dtype for dtype in concrete}
+    if len(unique_concrete) == 1:
+        return next(iter(unique_concrete))
+
+    if all(_is_integer_dtype(dtype) or _is_float_dtype(dtype) for dtype in unique_concrete):
+        return pl.Float64
+
+    if unique_concrete == {pl.Date, pl.Datetime} or unique_concrete == {pl.Datetime, pl.Date}:
+        return pl.Datetime("us")
+
+    dtype_list = ", ".join(sorted({_dtype_sort_key(dtype) for dtype in observed}))
+    raise PipelineError(
+        f"Failed to merge in-sheet tables: incompatible dtypes for column '{column_name}' ({dtype_list})"
+    )
+
+
+def _align_table_for_merge(
+    table_result: TableResult,
+    column_order: list[str],
+    dtype_by_column: dict[str, pl.DataType],
+) -> pl.DataFrame:
+    table = table_result.table
+    for column_name in column_order:
+        target_dtype = dtype_by_column[column_name]
+        if column_name in table.columns:
+            current_dtype = table.schema[column_name]
+            if current_dtype != target_dtype:
+                table = table.with_columns(pl.col(column_name).cast(target_dtype, strict=False))
+            continue
+        table = table.with_columns(pl.lit(None, dtype=target_dtype).alias(column_name))
+    return table.select(column_order)
+
+
+def _first_non_empty_header(headers: list[Any]) -> Any:
+    for header in headers:
+        if header not in (None, ""):
+            return header
+    return headers[0] if headers else None
+
+
+def _collect_source_headers_by_column_name(tables: list[TableResult]) -> dict[str, list[Any]]:
+    headers_by_name: dict[str, list[Any]] = {}
+    for table_result in tables:
+        for source_column in table_result.source_columns:
+            if not (0 <= source_column.index < len(table_result.table.columns)):
+                continue
+            column_name = table_result.table.columns[source_column.index]
+            headers_by_name.setdefault(column_name, []).append(source_column.header)
+    return headers_by_name
+
+
+def _build_merged_source_columns(
+    *,
+    merged_df: pl.DataFrame,
+    headers_by_name: dict[str, list[Any]],
+) -> list[SourceColumn]:
+    source_columns: list[SourceColumn] = []
+    for index, column_name in enumerate(merged_df.columns):
+        source_columns.append(
+            SourceColumn(
+                index=index,
+                header=_first_non_empty_header(headers_by_name.get(column_name, [])),
+                values=merged_df.get_column(column_name).to_list(),
+            )
+        )
+    return source_columns
+
+
+def _build_merged_mapped_columns(
+    *,
+    tables: list[TableResult],
+    merged_df: pl.DataFrame,
+) -> list[MappedColumn]:
+    merged_mapped: dict[str, MappedColumn] = {}
+    for table_result in tables:
+        for mapped in table_result.mapped_columns:
+            if mapped.field_name not in merged_df.columns:
+                continue
+            merged_values = merged_df.get_column(mapped.field_name).to_list()
+            existing = merged_mapped.get(mapped.field_name)
+            if existing is None:
+                merged_mapped[mapped.field_name] = MappedColumn(
+                    field_name=mapped.field_name,
+                    source_index=merged_df.columns.index(mapped.field_name),
+                    header=mapped.header,
+                    values=merged_values,
+                    score=mapped.score,
+                )
+                continue
+            header = existing.header if existing.header not in (None, "") else mapped.header
+            score_candidates = [score for score in (existing.score, mapped.score) if score is not None]
+            merged_mapped[mapped.field_name] = MappedColumn(
+                field_name=mapped.field_name,
+                source_index=existing.source_index,
+                header=header,
+                values=merged_values,
+                score=max(score_candidates) if score_candidates else None,
+            )
+    return sorted(merged_mapped.values(), key=lambda col: col.source_index)
+
+
+def _build_merged_column_scores(
+    *,
+    tables: list[TableResult],
+    merged_df: pl.DataFrame,
+) -> dict[int, dict[str, float]]:
+    merged_scores_by_name: dict[str, dict[str, float]] = {}
+    for table_result in tables:
+        for source_index, scores in table_result.column_scores.items():
+            if not (0 <= source_index < len(table_result.table.columns)):
+                continue
+            column_name = table_result.table.columns[source_index]
+            merged_scores = merged_scores_by_name.setdefault(column_name, {})
+            for field_name, score in scores.items():
+                current = merged_scores.get(field_name)
+                merged_scores[field_name] = score if current is None else max(current, score)
+
+    merged_scores: dict[int, dict[str, float]] = {}
+    for index, column_name in enumerate(merged_df.columns):
+        scores = merged_scores_by_name.get(column_name)
+        if scores:
+            merged_scores[index] = dict(scores)
+    return merged_scores
+
+
+def _build_merged_table_result(tables: list[TableResult], merged_df: pl.DataFrame) -> TableResult:
+    if not tables:
+        raise PipelineError("Failed to merge in-sheet tables: no tables provided")
+
+    sheet_name = tables[0].sheet_name
+    sheet_index = tables[0].sheet_index
+    if any(table.sheet_name != sheet_name for table in tables):
+        raise PipelineError("Failed to merge in-sheet tables: contributing tables span multiple sheets")
+    if any(table.sheet_index != sheet_index for table in tables):
+        raise PipelineError("Failed to merge in-sheet tables: contributing tables span multiple sheet indexes")
+
+    headers_by_name = _collect_source_headers_by_column_name(tables)
+    source_columns = _build_merged_source_columns(merged_df=merged_df, headers_by_name=headers_by_name)
+    mapped_columns = _build_merged_mapped_columns(tables=tables, merged_df=merged_df)
+    mapped_names = {column.field_name for column in mapped_columns}
+    unmapped_columns = [column for column in source_columns if merged_df.columns[column.index] not in mapped_names]
+    duplicate_unmapped_indices = {
+        source_column.index
+        for source_column in unmapped_columns
+        if source_column.index < len(merged_df.columns) and merged_df.columns[source_column.index] in mapped_names
+    }
+
+    return TableResult(
+        sheet_name=sheet_name,
+        table=merged_df,
+        source_region=_merge_source_regions(tables),
+        source_columns=source_columns,
+        table_index=0,
+        sheet_index=sheet_index,
+        mapped_columns=mapped_columns,
+        unmapped_columns=unmapped_columns,
+        column_scores=_build_merged_column_scores(tables=tables, merged_df=merged_df),
+        duplicate_unmapped_indices=duplicate_unmapped_indices,
+        row_count=merged_df.height,
+    )
+
+
 def _merge_source_regions(tables: list[TableResult]) -> TableRegion:
     regions = [table.source_region for table in tables if isinstance(table.source_region, TableRegion)]
     if not regions:
@@ -195,25 +400,21 @@ def _merge_tables_in_sheet(tables: list[TableResult]) -> list[TableResult]:
     if len(tables) <= 1:
         return tables
 
-    merged = pl.concat([table.table for table in tables], how="diagonal")
-    ordered_columns = _ordered_column_union(tables)
-    if ordered_columns:
-        merged = merged.select(ordered_columns)
+    column_order = _resolve_merged_column_order(tables)
+    dtype_by_column = {column_name: _resolve_merged_column_dtype(column_name, tables) for column_name in column_order}
 
-    template = tables[0]
-    merged_result = TableResult(
-        sheet_name=template.sheet_name,
-        table=merged,
-        source_region=_merge_source_regions(tables),
-        source_columns=template.source_columns,
-        table_index=0,
-        sheet_index=template.sheet_index,
-        mapped_columns=template.mapped_columns,
-        unmapped_columns=template.unmapped_columns,
-        column_scores=template.column_scores,
-        duplicate_unmapped_indices=set(template.duplicate_unmapped_indices),
-        row_count=merged.height,
-    )
+    try:
+        aligned_tables = [
+            _align_table_for_merge(table_result=table_result, column_order=column_order, dtype_by_column=dtype_by_column)
+            for table_result in tables
+        ]
+        merged = pl.concat(aligned_tables, how="vertical") if aligned_tables else pl.DataFrame()
+    except PipelineError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive normalization around Polars internals
+        raise PipelineError(f"Failed to merge in-sheet tables: {exc}") from exc
+
+    merged_result = _build_merged_table_result(tables, merged)
     return [merged_result]
 
 
