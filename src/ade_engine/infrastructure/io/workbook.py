@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import math
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,14 @@ import openpyxl
 from openpyxl import Workbook
 
 from ade_engine.models.errors import InputError
+
+_XLS_METADATA_ATTR = "_ade_xls_metadata"
+_XLS_ORIGINAL_NAME_ATTR = "_ade_xls_original_name"
+
+
+@dataclass(frozen=True)
+class _XlsWorkbookMetadata:
+    is_converted_xls: bool = True
 
 
 def load_source_workbook(path: Path) -> Workbook:
@@ -76,16 +85,24 @@ def _convert_xlrd_book_to_openpyxl(book: Any) -> Workbook:
         workbook.remove(workbook.worksheets[0])
 
     visible_sheet_index: int | None = None
-    visibility_by_sheet = list(getattr(book, "sheet_visibility", []))
-
+    selected_sheet_index: int | None = None
+    active_sheet_index: int | None = None
     for sheet_index in range(book.nsheets):
         sheet = book.sheet_by_index(sheet_index)
         ws = workbook.create_sheet(title=sheet.name)
+        setattr(ws, _XLS_ORIGINAL_NAME_ATTR, str(sheet.name))
 
-        visibility = visibility_by_sheet[sheet_index] if sheet_index < len(visibility_by_sheet) else 0
+        visibility = _get_xls_sheet_visibility(book, sheet, sheet_index)
         ws.sheet_state = _map_sheet_visibility(visibility)
-        if visible_sheet_index is None and ws.sheet_state == "visible":
+        is_visible = ws.sheet_state == "visible"
+        is_active = bool(getattr(sheet, "sheet_visible", False))
+        is_selected = bool(getattr(sheet, "sheet_selected", False))
+        if visible_sheet_index is None and is_visible:
             visible_sheet_index = sheet_index
+        if active_sheet_index is None and is_visible and is_active:
+            active_sheet_index = sheet_index
+        if selected_sheet_index is None and is_visible and is_selected:
+            selected_sheet_index = sheet_index
 
         for row_index in range(sheet.nrows):
             row_values = [_convert_xls_cell_value(book, cell) for cell in _iter_xls_row_cells(sheet, row_index)]
@@ -105,7 +122,16 @@ def _convert_xlrd_book_to_openpyxl(book: Any) -> Workbook:
     if not workbook.worksheets:
         raise InputError("Workbook contains no worksheets")
 
-    workbook.active = visible_sheet_index if visible_sheet_index is not None else 0
+    resolved_active_index = active_sheet_index
+    if resolved_active_index is None:
+        resolved_active_index = selected_sheet_index
+    if resolved_active_index is None:
+        resolved_active_index = visible_sheet_index
+    if resolved_active_index is None:
+        resolved_active_index = 0
+
+    workbook.active = resolved_active_index
+    _set_xls_workbook_metadata(workbook)
     return workbook
 
 
@@ -131,6 +157,36 @@ def _iter_xls_row_cells(sheet: Any, row_index: int) -> list[Any]:
         ]
 
     return [sheet.cell(row_index, col_index) for col_index in range(sheet.ncols)]
+
+
+def _get_xls_sheet_visibility(book: Any, sheet: Any, sheet_index: int) -> int:
+    visibility = getattr(sheet, "visibility", None)
+    if isinstance(visibility, int):
+        return visibility
+
+    visibility_by_sheet = getattr(book, "_sheet_visibility", None)
+    if visibility_by_sheet is None:
+        visibility_by_sheet = getattr(book, "sheet_visibility", None)
+    if isinstance(visibility_by_sheet, (list, tuple)) and sheet_index < len(visibility_by_sheet):
+        raw_visibility = visibility_by_sheet[sheet_index]
+        if isinstance(raw_visibility, int):
+            return raw_visibility
+    return 0
+
+
+def _set_xls_workbook_metadata(workbook: Workbook) -> None:
+    setattr(
+        workbook,
+        _XLS_METADATA_ATTR,
+        _XlsWorkbookMetadata(),
+    )
+
+
+def _get_xls_workbook_metadata(workbook: Workbook) -> _XlsWorkbookMetadata | None:
+    metadata = getattr(workbook, _XLS_METADATA_ATTR, None)
+    if isinstance(metadata, _XlsWorkbookMetadata):
+        return metadata
+    return None
 
 
 def _convert_xls_cell_value(book: Any, cell: Any) -> Any:
@@ -193,6 +249,10 @@ def resolve_sheet_names(
 ) -> list[str]:
     """Determine which sheets to process, preserving source order."""
 
+    xls_metadata = _get_xls_workbook_metadata(workbook)
+    if xls_metadata is not None:
+        return _resolve_xls_sheet_names(workbook, requested, active_only=active_only)
+
     visible = [ws.title for ws in workbook.worksheets if getattr(ws, "sheet_state", "visible") == "visible"]
     if active_only:
         if not visible:
@@ -216,6 +276,45 @@ def resolve_sheet_names(
 
     order_index = {name: idx for idx, name in enumerate(visible)}
     return sorted(unique_requested, key=lambda n: order_index[n])
+
+
+def _resolve_xls_sheet_names(
+    workbook: Workbook,
+    requested: list[str] | None,
+    *,
+    active_only: bool,
+) -> list[str]:
+    visible_sheets = [ws for ws in workbook.worksheets if getattr(ws, "sheet_state", "visible") == "visible"]
+    visible_titles = [ws.title for ws in visible_sheets]
+    if active_only:
+        if not visible_sheets:
+            raise InputError("No visible worksheets available")
+        active = workbook.active
+        active_name = getattr(active, "title", None)
+        if not active_name:
+            raise InputError("Active worksheet is not available")
+        if active_name not in visible_titles:
+            raise InputError(f"Active worksheet is hidden: {active_name}")
+        return [active_name]
+
+    if not requested:
+        return visible_titles
+
+    cleaned = [name.strip() for name in requested if isinstance(name, str) and name.strip()]
+    unique_requested = list(dict.fromkeys(cleaned))
+
+    visible_by_requested_name: dict[str, str] = {}
+    for ws in visible_sheets:
+        visible_by_requested_name[ws.title] = ws.title
+        visible_by_requested_name[str(getattr(ws, _XLS_ORIGINAL_NAME_ATTR, ws.title))] = ws.title
+
+    missing = [name for name in unique_requested if name not in visible_by_requested_name]
+    if missing:
+        raise InputError(f"Worksheet(s) not found: {', '.join(missing)}")
+
+    order_index = {ws.title: idx for idx, ws in enumerate(visible_sheets)}
+    resolved = [visible_by_requested_name[name] for name in unique_requested]
+    return sorted(resolved, key=lambda n: order_index[n])
 
 
 __all__ = [

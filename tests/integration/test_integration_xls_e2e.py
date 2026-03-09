@@ -90,6 +90,30 @@ def _write_xls_workbook(path: Path) -> None:
     workbook.save(str(path))
 
 
+def _write_multi_sheet_xls_workbook(path: Path) -> None:
+    xlwt = pytest.importorskip("xlwt")
+
+    workbook = xlwt.Workbook()
+
+    primary = workbook.add_sheet("Summary")
+    primary.write(0, 0, "Email")
+    primary.write(0, 1, "Name")
+    primary.write(0, 2, "Notes")
+    primary.write(1, 0, "USER@Example.com")
+    primary.write(1, 1, "Alice")
+    primary.write(1, 2, "main-note")
+
+    secondary = workbook.add_sheet("Executive")
+    secondary.write(0, 0, "Email")
+    secondary.write(0, 1, "Name")
+    secondary.write(0, 2, "Notes")
+    secondary.write(1, 0, "OTHER@Example.com")
+    secondary.write(1, 1, "Bob")
+    secondary.write(1, 2, "secondary-note")
+
+    workbook.save(str(path))
+
+
 def test_end_to_end_pipeline_for_xls(tmp_path: Path):
     config_root = tmp_path / "cfg"
     config_root.mkdir()
@@ -149,4 +173,63 @@ def test_corrupt_xls_fails_with_input_error(tmp_path: Path):
     assert result.status == RunStatus.FAILED
     assert result.error is not None
     assert result.error.code == RunErrorCode.INPUT_ERROR
+
+
+def test_end_to_end_pipeline_for_xls_processes_requested_sheet_names_from_source_workbook(tmp_path: Path):
+    config_root = tmp_path / "cfg"
+    config_root.mkdir()
+    _write_config_package(config_root)
+
+    source = tmp_path / "multi_input.xls"
+    _write_multi_sheet_xls_workbook(source)
+
+    engine = Engine(settings=Settings())
+    result = engine.run(
+        RunRequest(
+            config_package=config_root,
+            input_file=source,
+            input_sheets=["Executive"],
+            output_dir=tmp_path / "out",
+            logs_dir=tmp_path / "logs",
+        )
+    )
+
+    assert result.status == RunStatus.SUCCEEDED
+    assert result.output_path is not None
+
+    wb = openpyxl.load_workbook(result.output_path)
+    assert wb.sheetnames == ["Executive"]
+    rows = list(wb.active.iter_rows(min_row=2, values_only=True))
+    assert rows == [("other@example.com", "Bob", "secondary-note")]
+    wb.close()
+
+
+def test_end_to_end_pipeline_for_xls_processes_all_visible_sheets_in_source_order(tmp_path: Path):
+    config_root = tmp_path / "cfg"
+    config_root.mkdir()
+    _write_config_package(config_root)
+
+    source = tmp_path / "multi_input.xls"
+    _write_multi_sheet_xls_workbook(source)
+
+    engine = Engine(settings=Settings())
+    result = engine.run(
+        RunRequest(
+            config_package=config_root,
+            input_file=source,
+            output_dir=tmp_path / "out",
+            logs_dir=tmp_path / "logs",
+        )
+    )
+
+    assert result.status == RunStatus.SUCCEEDED
+    assert result.output_path is not None
+
+    wb = openpyxl.load_workbook(result.output_path)
+    assert wb.sheetnames == ["Summary", "Executive"]
+    first_rows = list(wb["Summary"].iter_rows(min_row=2, values_only=True))
+    second_rows = list(wb["Executive"].iter_rows(min_row=2, values_only=True))
+    assert first_rows == [("user@example.com", "Alice", "main-note")]
+    assert second_rows == [("other@example.com", "Bob", "secondary-note")]
+    wb.close()
 
