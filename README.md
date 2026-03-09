@@ -1,6 +1,6 @@
 # ADE Engine (CLI)
 
-Lightweight, configurable engine for normalizing Excel/CSV workbooks. This README is a fast path to install, scaffold a config package, and run single/batch jobs.
+Lightweight, configurable engine for normalizing Excel/CSV workbooks. Supported input formats are `.xlsx`, `.xlsm`, `.xls`, and `.csv`; output is always written as `.xlsx`.
 
 ## Requirements
 
@@ -50,7 +50,7 @@ ade-engine config validate --config-package my-config
 
 # 3) Process a single file
 ade-engine process file \
-  --input data/samples/CaressantWRH_251130__ORIGINAL.xlsx \
+  --input data/samples/CaressantWRH_251130__ORIGINAL.xls \
   --output-dir output \
   --config-package my-config
 

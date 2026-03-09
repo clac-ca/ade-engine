@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     merge_stacked_headers: bool = Field(default=True)
 
     # File discovery
-    supported_file_extensions: tuple[str, ...] = Field(default=(".xlsx", ".xlsm", ".csv"))
+    supported_file_extensions: tuple[str, ...] = Field(default=(".xlsx", ".xlsm", ".xls", ".csv"))
 
     @field_validator("log_level", mode="before")
     @classmethod
