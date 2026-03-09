@@ -14,7 +14,7 @@ This repo uses release-please single-package mode to automate version bumps and 
 ## Version source of truth
 
 - `pyproject.toml` (`project.version`) is the canonical version.
-- `release-please-config.json` defines the single package released from this repo.
+- The workflow uses the upstream single-package action input `release-type: python`.
 - The release PR keeps `pyproject.toml` in sync with the generated release version.
 
 ## Releasing
