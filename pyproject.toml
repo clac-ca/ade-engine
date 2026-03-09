@@ -22,6 +22,7 @@ dependencies = [
   "pydantic==2.12.5",
   "pydantic-settings==2.12.0",
   "typer==0.20.0",
+  "xlrd==2.0.1",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,7 @@ dev = [
   "import-linter>=2.0",
   "pytest>=8.0",
   "twine>=6.0",
+  "xlwt>=1.3.0",
 ]
 
 [project.scripts]
@@ -64,4 +66,5 @@ dev = [
   "import-linter>=2.0",
   "pytest>=8.0",
   "twine>=6.0",
+  "xlwt>=1.3.0",
 ]
