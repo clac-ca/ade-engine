@@ -4,13 +4,13 @@ from openpyxl import Workbook
 import polars as pl
 import pytest
 
-from ade_engine.application.pipeline.pipeline import Pipeline, _merge_tables_in_sheet
+from ade_engine.application.pipeline.pipeline import Pipeline, _build_merged_table_result, _merge_tables_in_sheet
 from ade_engine.extensions.registry import Registry
 from ade_engine.infrastructure.observability.logger import NullLogger
 from ade_engine.infrastructure.settings import Settings
 from ade_engine.models.errors import PipelineError
 from ade_engine.models.extension_contexts import FieldDef, RowKind
-from ade_engine.models.table import SourceColumn, TableRegion, TableResult
+from ade_engine.models.table import MappedColumn, SourceColumn, TableRegion, TableResult
 
 
 def test_process_sheet_renders_multiple_tables_with_blank_row():
@@ -576,3 +576,63 @@ def test_merge_tables_in_sheet_preserves_duplicate_unmapped_indices():
     merged = _merge_tables_in_sheet([table_a, table_b])[0]
 
     assert merged.duplicate_unmapped_indices == {0}
+
+
+def test_build_merged_table_result_materializes_each_merged_column_once(monkeypatch: pytest.MonkeyPatch):
+    merged_df = pl.DataFrame(
+        {
+            "email": ["a@example.com", None],
+            "name": [None, "Alice"],
+        }
+    )
+    table_a = TableResult(
+        sheet_name="Sheet1",
+        table=pl.DataFrame({"email": ["a@example.com"]}),
+        source_region=TableRegion(min_row=1, min_col=1, max_row=2, max_col=1),
+        source_columns=[SourceColumn(index=0, header="Email", values=["a@example.com"])],
+        table_index=0,
+        sheet_index=0,
+        mapped_columns=[
+            MappedColumn(
+                field_name="email",
+                source_index=0,
+                header="Email",
+                values=["a@example.com"],
+                score=0.9,
+            )
+        ],
+        row_count=1,
+    )
+    table_b = TableResult(
+        sheet_name="Sheet1",
+        table=pl.DataFrame({"name": ["Alice"]}),
+        source_region=TableRegion(min_row=4, min_col=1, max_row=5, max_col=1),
+        source_columns=[SourceColumn(index=0, header="Name", values=["Alice"])],
+        table_index=1,
+        sheet_index=0,
+        mapped_columns=[
+            MappedColumn(
+                field_name="name",
+                source_index=0,
+                header="Name",
+                values=["Alice"],
+                score=0.8,
+            )
+        ],
+        row_count=1,
+    )
+
+    get_column_calls: dict[str, int] = {}
+    original_get_column = pl.DataFrame.get_column
+
+    def counting_get_column(self: pl.DataFrame, name: str) -> pl.Series:
+        if self is merged_df:
+            get_column_calls[name] = get_column_calls.get(name, 0) + 1
+        return original_get_column(self, name)
+
+    monkeypatch.setattr(pl.DataFrame, "get_column", counting_get_column)
+
+    merged = _build_merged_table_result([table_a, table_b], merged_df)
+
+    assert merged.table.columns == ["email", "name"]
+    assert get_column_calls == {"email": 1, "name": 1}

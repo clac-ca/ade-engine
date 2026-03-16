@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, List
 
@@ -317,18 +318,34 @@ def _collect_source_headers_by_column_name(tables: list[TableResult]) -> dict[st
     return headers_by_name
 
 
+@dataclass(frozen=True)
+class _MergedFrameMetadata:
+    column_names: list[str]
+    column_indexes_by_name: dict[str, int]
+    column_values_by_name: dict[str, list[Any]]
+
+
+def _build_merged_frame_metadata(merged_df: pl.DataFrame) -> _MergedFrameMetadata:
+    column_names = list(merged_df.columns)
+    return _MergedFrameMetadata(
+        column_names=column_names,
+        column_indexes_by_name={column_name: index for index, column_name in enumerate(column_names)},
+        column_values_by_name={column_name: merged_df.get_column(column_name).to_list() for column_name in column_names},
+    )
+
+
 def _build_merged_source_columns(
     *,
-    merged_df: pl.DataFrame,
+    merged_frame: _MergedFrameMetadata,
     headers_by_name: dict[str, list[Any]],
 ) -> list[SourceColumn]:
     source_columns: list[SourceColumn] = []
-    for index, column_name in enumerate(merged_df.columns):
+    for index, column_name in enumerate(merged_frame.column_names):
         source_columns.append(
             SourceColumn(
                 index=index,
                 header=_first_non_empty_header(headers_by_name.get(column_name, [])),
-                values=merged_df.get_column(column_name).to_list(),
+                values=merged_frame.column_values_by_name[column_name],
             )
         )
     return source_columns
@@ -337,19 +354,19 @@ def _build_merged_source_columns(
 def _build_merged_mapped_columns(
     *,
     tables: list[TableResult],
-    merged_df: pl.DataFrame,
+    merged_frame: _MergedFrameMetadata,
 ) -> list[MappedColumn]:
     merged_mapped: dict[str, MappedColumn] = {}
     for table_result in tables:
         for mapped in table_result.mapped_columns:
-            if mapped.field_name not in merged_df.columns:
+            merged_values = merged_frame.column_values_by_name.get(mapped.field_name)
+            if merged_values is None:
                 continue
-            merged_values = merged_df.get_column(mapped.field_name).to_list()
             existing = merged_mapped.get(mapped.field_name)
             if existing is None:
                 merged_mapped[mapped.field_name] = MappedColumn(
                     field_name=mapped.field_name,
-                    source_index=merged_df.columns.index(mapped.field_name),
+                    source_index=merged_frame.column_indexes_by_name[mapped.field_name],
                     header=mapped.header,
                     values=merged_values,
                     score=mapped.score,
@@ -370,7 +387,7 @@ def _build_merged_mapped_columns(
 def _build_merged_column_scores(
     *,
     tables: list[TableResult],
-    merged_df: pl.DataFrame,
+    merged_frame: _MergedFrameMetadata,
 ) -> dict[int, dict[str, float]]:
     merged_scores_by_name: dict[str, dict[str, float]] = {}
     for table_result in tables:
@@ -384,7 +401,7 @@ def _build_merged_column_scores(
                 merged_scores[field_name] = score if current is None else max(current, score)
 
     merged_scores: dict[int, dict[str, float]] = {}
-    for index, column_name in enumerate(merged_df.columns):
+    for index, column_name in enumerate(merged_frame.column_names):
         scores = merged_scores_by_name.get(column_name)
         if scores:
             merged_scores[index] = dict(scores)
@@ -402,11 +419,12 @@ def _build_merged_table_result(tables: list[TableResult], merged_df: pl.DataFram
     if any(table.sheet_index != sheet_index for table in tables):
         raise PipelineError("Failed to merge in-sheet tables: contributing tables span multiple sheet indexes")
 
+    merged_frame = _build_merged_frame_metadata(merged_df)
     headers_by_name = _collect_source_headers_by_column_name(tables)
-    source_columns = _build_merged_source_columns(merged_df=merged_df, headers_by_name=headers_by_name)
-    mapped_columns = _build_merged_mapped_columns(tables=tables, merged_df=merged_df)
+    source_columns = _build_merged_source_columns(merged_frame=merged_frame, headers_by_name=headers_by_name)
+    mapped_columns = _build_merged_mapped_columns(tables=tables, merged_frame=merged_frame)
     mapped_names = {column.field_name for column in mapped_columns}
-    unmapped_columns = [column for column in source_columns if merged_df.columns[column.index] not in mapped_names]
+    unmapped_columns = [column for column in source_columns if merged_frame.column_names[column.index] not in mapped_names]
     duplicate_unmapped_names: set[str] = set()
     for table_result in tables:
         for source_index in table_result.duplicate_unmapped_indices:
@@ -414,7 +432,7 @@ def _build_merged_table_result(tables: list[TableResult], merged_df: pl.DataFram
                 duplicate_unmapped_names.add(table_result.table.columns[source_index])
 
     duplicate_unmapped_indices = {
-        index for index, column_name in enumerate(merged_df.columns) if column_name in duplicate_unmapped_names
+        index for index, column_name in enumerate(merged_frame.column_names) if column_name in duplicate_unmapped_names
     }
 
     return TableResult(
@@ -426,7 +444,7 @@ def _build_merged_table_result(tables: list[TableResult], merged_df: pl.DataFram
         sheet_index=sheet_index,
         mapped_columns=mapped_columns,
         unmapped_columns=unmapped_columns,
-        column_scores=_build_merged_column_scores(tables=tables, merged_df=merged_df),
+        column_scores=_build_merged_column_scores(tables=tables, merged_frame=merged_frame),
         duplicate_unmapped_indices=duplicate_unmapped_indices,
         row_count=merged_df.height,
     )
