@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.3](https://github.com/clac-ca/ade-engine/compare/v1.9.2...v1.9.3) (2026-04-14)
+
+
+### Bug Fixes
+
+* trigger release for workbook stylesheet repair ([#31](https://github.com/clac-ca/ade-engine/issues/31)) ([2709d92](https://github.com/clac-ca/ade-engine/commit/2709d92179b43daa31ad3dbfe6a084f18b929493))
+
 ## [1.9.2](https://github.com/clac-ca/ade-engine/compare/v1.9.1...v1.9.2) (2026-03-16)
 
 
