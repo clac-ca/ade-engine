@@ -147,7 +147,7 @@ def test_load_source_workbook_xls_missing_dependency_raises_input_error(tmp_path
 
     def _raise_import_error(_: str) -> Any:
         raise InputError(
-            "Input format requires optional dependency 'xlrd'. Install with: pip install 'ade-engine[input-adapters]'"
+            "Input format requires optional dependency 'xlrd'. Install engine dependencies (for example: pip install -e .)"
         )
 
     monkeypatch.setattr(workbook_io, "_import_optional_module", _raise_import_error)

@@ -17,12 +17,6 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### Optional adapters for `.xls` and `.pdf`
-
-```bash
-pip install -e ".[input-adapters]"
-```
-
 ### From this repo (uv)
 
 ```bash
@@ -72,7 +66,7 @@ Notes:
 - `process batch --include` acts as an allowlist; if provided, only matching files run. `--exclude` patterns always prune recursively.
 - `process file` requires either `--output` or `--output-dir` (mutually exclusive).
 - Supported input extensions by default: `.xlsx`, `.xlsm`, `.csv`, `.xls`, `.pdf`.
-- `.xls` and `.pdf` ingestion requires optional adapters (`xlrd`, `pdfplumber`).
+- `.xls` and `.pdf` ingestion is included in base dependencies (`xlrd`, `pdfplumber`).
 - PDF support is table-extraction only (no OCR).
 
 ## Commands

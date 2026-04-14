@@ -2,6 +2,12 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+.DS_Store
 
 dist/
 src/ade_engine.egg-info/
+
+# Local run/test artifacts
+tmp/
+output/
+logs/

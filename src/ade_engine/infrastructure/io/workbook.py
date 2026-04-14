@@ -24,7 +24,7 @@ def _import_optional_module(name: str) -> Any:
     except ImportError as exc:
         raise InputNormalizationError(
             f"Input format requires optional dependency '{name}'. "
-            f"Install with: pip install 'ade-engine[input-adapters]'"
+            f"Install engine dependencies (for example: pip install -e .)"
         ) from exc
 
 
