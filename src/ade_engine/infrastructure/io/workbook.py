@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import csv
 import math
+import re
+from io import BytesIO
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import openpyxl
 from openpyxl import Workbook
@@ -52,7 +55,72 @@ def _load_openpyxl_workbook(path: Path) -> Workbook:
     try:
         return openpyxl.load_workbook(filename=path, read_only=True, data_only=True)
     except Exception as exc:  # pragma: no cover - openpyxl owns error types
+        repaired_workbook = _try_load_workbook_with_repaired_styles(path, exc)
+        if repaired_workbook is not None:
+            return repaired_workbook
         raise InputError(f"Failed to open workbook '{path}': {exc}") from exc
+
+
+def _try_load_workbook_with_repaired_styles(path: Path, exc: Exception) -> Workbook | None:
+    if not _is_invalid_font_family_stylesheet_error(exc):
+        return None
+
+    repaired_bytes = _repair_invalid_font_families_in_archive(path)
+    if repaired_bytes is None:
+        return None
+
+    try:
+        return openpyxl.load_workbook(filename=BytesIO(repaired_bytes), read_only=True, data_only=True)
+    except Exception:
+        return None
+
+
+def _is_invalid_font_family_stylesheet_error(exc: Exception) -> bool:
+    if "could not read stylesheet" not in str(exc):
+        return False
+
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if "Max value is 14" in str(current):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _repair_invalid_font_families_in_archive(path: Path) -> bytes | None:
+    with ZipFile(path) as archive:
+        try:
+            styles_xml = archive.read("xl/styles.xml")
+        except KeyError:
+            return None
+
+        repaired_styles_xml, changed = _remove_invalid_font_family_elements(styles_xml)
+        if not changed:
+            return None
+
+        buffer = BytesIO()
+        with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as repaired_archive:
+            for member in archive.infolist():
+                data = repaired_styles_xml if member.filename == "xl/styles.xml" else archive.read(member.filename)
+                repaired_archive.writestr(member, data)
+        return buffer.getvalue()
+
+
+def _remove_invalid_font_family_elements(styles_xml: bytes) -> tuple[bytes, bool]:
+    pattern = re.compile(rb"<family\b[^>]*\bval=\"(\d+)\"[^>]*/>")
+    changed = False
+
+    def _replace(match: re.Match[bytes]) -> bytes:
+        nonlocal changed
+        family_value = int(match.group(1))
+        if family_value <= 14:
+            return match.group(0)
+        changed = True
+        return b""
+
+    return pattern.sub(_replace, styles_xml), changed
 
 
 def _load_xls_workbook(path: Path) -> Workbook:
