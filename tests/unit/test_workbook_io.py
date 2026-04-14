@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from openpyxl import Workbook
@@ -147,6 +149,34 @@ def test_load_source_workbook_reads_xls_into_workbook(tmp_path: Path):
     assert workbook.active["A1"].value == "Header"
     assert workbook.active["A2"].value == "USER@Example.com"
     workbook.close()
+
+
+def test_load_source_workbook_repairs_invalid_font_family_in_stylesheet(tmp_path: Path):
+    source = tmp_path / "input.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.title = "Data"
+    sheet["A1"] = "Header"
+    sheet["A2"] = "Alice"
+    workbook.save(source)
+    workbook.close()
+
+    _corrupt_stylesheet_font_family(source, invalid_value=16)
+
+    loaded = load_source_workbook(source)
+
+    assert loaded.sheetnames == ["Data"]
+    assert loaded.active["A2"].value == "Alice"
+    loaded.close()
+
+
+def test_load_source_workbook_raises_input_error_for_other_openpyxl_failures(tmp_path: Path):
+    source = tmp_path / "broken.xlsx"
+    source.write_bytes(b"not a zip archive")
+
+    with pytest.raises(InputError, match="Failed to open workbook"):
+        load_source_workbook(source)
 
 
 def test_convert_xlrd_book_to_openpyxl_uses_row_arrays_when_cell_access_breaks():
@@ -298,3 +328,21 @@ def test_resolve_sheet_names_rejects_active_only_when_no_visible_sheets():
     with pytest.raises(InputError, match="No visible worksheets available"):
         resolve_sheet_names(workbook, requested=None, active_only=True)
 
+
+def _corrupt_stylesheet_font_family(path: Path, *, invalid_value: int) -> None:
+    buffer = BytesIO()
+    with ZipFile(path) as archive:
+        styles_xml = archive.read("xl/styles.xml")
+        corrupted_styles_xml = styles_xml.replace(
+            b'<family val="2" />',
+            f'<family val="{invalid_value}" />'.encode(),
+            1,
+        )
+        assert corrupted_styles_xml != styles_xml
+
+        with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as rewritten:
+            for member in archive.infolist():
+                data = corrupted_styles_xml if member.filename == "xl/styles.xml" else archive.read(member.filename)
+                rewritten.writestr(member, data)
+
+    path.write_bytes(buffer.getvalue())
