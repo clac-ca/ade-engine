@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2](https://github.com/clac-ca/ade-engine/compare/v1.9.1...v1.9.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* **pipeline:** cache merged frame column materialization ([#27](https://github.com/clac-ca/ade-engine/issues/27)) ([06bdf30](https://github.com/clac-ca/ade-engine/commit/06bdf30e41085c121f909b1412d2259edd27c09f))
+
 ## [1.9.1](https://github.com/clac-ca/ade-engine/compare/v1.9.0...v1.9.1) (2026-03-09)
 
 
