@@ -149,3 +149,38 @@ Table hooks that may replace the DataFrame:
 - `on_table_validated`
 
 These hooks may return `pl.DataFrame` or `None`. All other hooks must return `None`.
+
+### Reporting derived field mappings
+
+Hooks and transforms that derive a registered field from an existing source column
+can report that provenance through `state` without adding a synthetic source
+column. The engine records these as `TableResult.derived_mappings`, counts the
+field as detected in `engine.run.completed` field rollups, and exposes the
+original source header on the field summary.
+
+Preferred engine-owned contract:
+
+```python
+state.setdefault("ade_engine", {}).setdefault("derived_mappings", []).append(
+    {
+        "field_name": "postal_code",
+        "source_header": "Address Line 1",
+        # optional when the header exists in the current source columns
+        "source_index": 0,
+        # optional scoping for multi-table/multi-sheet workbooks
+        "table_index": table_index,
+        "sheet_name": source_sheet.title,
+    }
+)
+```
+
+For compatibility, the engine also reads the existing config-package convention:
+
+```python
+state.setdefault("ade_config", {}).setdefault("mapping_overrides", {}).setdefault(
+    "original_header_overrides", {}
+)["postal_code"] = "Address Line 1"
+```
+
+Derived mappings affect field detection/reporting only. Physical column counts
+and `structure.columns` still describe only real source columns.

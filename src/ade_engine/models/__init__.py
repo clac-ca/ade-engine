@@ -36,7 +36,7 @@ from ade_engine.models.extension_outputs import (
     RowDetectorResult,
 )
 from ade_engine.models.run import RunError, RunErrorCode, RunRequest, RunResult, RunStatus
-from ade_engine.models.table import MappedColumn, SourceColumn, TableRegion, TableResult
+from ade_engine.models.table import DerivedMapping, MappedColumn, SourceColumn, TableRegion, TableResult
 
 __all__ = [
     "AdeEngineError",
@@ -75,6 +75,7 @@ __all__ = [
     "RunStatus",
     "SourceColumn",
     "MappedColumn",
+    "DerivedMapping",
     "TableRegion",
     "TableResult",
 ]

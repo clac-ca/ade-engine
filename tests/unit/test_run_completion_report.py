@@ -6,9 +6,11 @@ from pathlib import Path
 import polars as pl
 
 from ade_engine.application.run_completion_report import RunCompletionReportBuilder
+from ade_engine.extensions.registry import Registry
 from ade_engine.infrastructure.settings import Settings
+from ade_engine.models.extension_contexts import FieldDef
 from ade_engine.models.run import RunStatus
-from ade_engine.models.table import SourceColumn, TableRegion, TableResult
+from ade_engine.models.table import DerivedMapping, MappedColumn, SourceColumn, TableRegion, TableResult
 
 
 def test_run_completion_report_allows_hooks_to_filter_rows() -> None:
@@ -51,3 +53,78 @@ def test_run_completion_report_allows_hooks_to_filter_rows() -> None:
     assert table_summary.counts.cells is not None
     assert table_summary.counts.cells.total == 12
     assert table_summary.counts.cells.non_empty == 10
+
+
+def test_run_completion_report_counts_derived_mappings_without_synthetic_columns() -> None:
+    builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
+    registry = Registry()
+    registry.register_field(FieldDef(name="address_line1", label="Address Line 1"))
+    registry.register_field(FieldDef(name="postal_code", label="Postal Code"))
+    builder.set_registry(registry)
+
+    source_columns = [
+        SourceColumn(index=0, header="Address Line 1", values=["123 Main St V1A 2B3"]),
+    ]
+
+    table = pl.DataFrame(
+        {
+            "address_line1": ["123 Main St"],
+            "postal_code": ["V1A 2B3"],
+        }
+    )
+
+    builder.record_table(
+        TableResult(
+            sheet_name="Sheet1",
+            sheet_index=0,
+            table_index=0,
+            source_region=TableRegion(min_row=1, min_col=1, max_row=2, max_col=1),
+            source_columns=source_columns,
+            table=table,
+            row_count=table.height,
+            mapped_columns=[
+                MappedColumn(
+                    field_name="address_line1",
+                    source_index=0,
+                    header="Address Line 1",
+                    values=["123 Main St V1A 2B3"],
+                    score=0.92,
+                )
+            ],
+            derived_mappings=[
+                DerivedMapping(
+                    field_name="postal_code",
+                    source_header="Address Line 1",
+                    source_index=0,
+                    score=1.0,
+                )
+            ],
+        )
+    )
+
+    payload = builder.build(
+        run_status=RunStatus.SUCCEEDED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        error=None,
+        output_path=None,
+        output_written=False,
+    )
+
+    table_summary = payload.workbooks[0].sheets[0].tables[0]
+    assert table_summary.counts.columns.total == 1
+    assert table_summary.counts.columns.mapped == 1
+    assert table_summary.counts.fields.detected == 2
+    assert len(table_summary.structure.columns) == 1
+
+    fields = {field.field: field for field in table_summary.fields}
+    assert fields["postal_code"].detected is True
+    assert fields["postal_code"].derived is True
+    assert fields["postal_code"].source_headers == ["Address Line 1"]
+    assert fields["postal_code"].occurrences.columns == 1
+
+    run_fields = {field.field: field for field in payload.fields}
+    assert payload.counts.fields.detected == 2
+    assert run_fields["postal_code"].detected is True
+    assert run_fields["postal_code"].derived is True
+    assert run_fields["postal_code"].source_headers == ["Address Line 1"]

@@ -18,7 +18,7 @@ from ade_engine.infrastructure.observability.logger import RunLogger
 from ade_engine.infrastructure.settings import Settings
 from ade_engine.models.errors import PipelineError
 from ade_engine.models.extension_contexts import HookName
-from ade_engine.models.table import MappedColumn, SourceColumn, TableRegion, TableResult
+from ade_engine.models.table import DerivedMapping, MappedColumn, SourceColumn, TableRegion, TableResult
 
 
 def _stringify_cell(value: Any) -> str | None:
@@ -144,6 +144,136 @@ def _apply_mapping_as_rename(
     if not rename_map:
         return table, {}
     return table.rename(rename_map), rename_map
+
+
+def _state_mapping_at_path(state: dict, path: tuple[str, ...]) -> Any:
+    current: Any = state
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _iter_derived_mapping_entries(state: dict) -> list[Any]:
+    entries: list[Any] = []
+
+    # Formal engine-owned contract for new config packages.
+    formal = _state_mapping_at_path(state, ("ade_engine", "derived_mappings"))
+    if isinstance(formal, list):
+        entries.extend(formal)
+    elif isinstance(formal, dict):
+        entries.append(formal)
+
+    # Backwards-compatible contract used by existing ADE config hooks.
+    overrides = _state_mapping_at_path(state, ("ade_config", "mapping_overrides", "original_header_overrides"))
+    if overrides is None and isinstance(state, dict):
+        dotted = state.get("ade_config.mapping_overrides")
+        if isinstance(dotted, dict):
+            overrides = dotted.get("original_header_overrides")
+
+    if isinstance(overrides, dict):
+        for field_name, source in overrides.items():
+            if isinstance(source, dict):
+                entry = dict(source)
+                entry.setdefault("field_name", field_name)
+                entries.append(entry)
+            else:
+                entries.append({"field_name": field_name, "source_header": source})
+    elif isinstance(overrides, list):
+        entries.extend(overrides)
+
+    return entries
+
+
+def _source_index_for_header(source_columns: list[SourceColumn], source_header: Any) -> int | None:
+    if source_header in (None, ""):
+        return None
+    wanted = str(source_header).strip()
+    if not wanted:
+        return None
+    for col in source_columns:
+        if col.header in (None, ""):
+            continue
+        if str(col.header).strip() == wanted:
+            return int(col.index)
+    return None
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_float(value: Any, *, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _collect_derived_mappings(
+    *,
+    state: dict,
+    table: pl.DataFrame,
+    source_columns: list[SourceColumn],
+    mapped_columns: list[MappedColumn],
+    sheet_name: str,
+    table_index: int,
+) -> list[DerivedMapping]:
+    physical_fields = {str(col.field_name) for col in mapped_columns}
+    table_fields = set(table.columns)
+    out: dict[str, DerivedMapping] = {}
+
+    for entry in _iter_derived_mapping_entries(state):
+        if not isinstance(entry, dict):
+            continue
+
+        scoped_table = _coerce_optional_int(entry.get("table_index"))
+        if entry.get("table_index") is not None and scoped_table is None:
+            continue
+        if scoped_table is not None and scoped_table != int(table_index):
+            continue
+        scoped_sheet = entry.get("sheet_name")
+        if scoped_sheet is not None and str(scoped_sheet) != str(sheet_name):
+            continue
+
+        field_name = entry.get("field_name", entry.get("field"))
+        source_header = entry.get("source_header", entry.get("original_header", entry.get("header")))
+        if field_name in (None, "") or source_header in (None, ""):
+            continue
+
+        field_text = str(field_name)
+        if field_text in physical_fields or field_text not in table_fields:
+            continue
+
+        source_index = entry.get("source_index")
+        if source_index is None:
+            source_index = _source_index_for_header(source_columns, source_header)
+        else:
+            source_index = _coerce_optional_int(source_index)
+
+        if source_index is None:
+            continue
+
+        score = _coerce_optional_float(entry.get("score"), default=1.0)
+        out[field_text] = DerivedMapping(
+            field_name=field_text,
+            source_header=source_header,
+            source_index=source_index,
+            score=score,
+        )
+
+    return sorted(
+        out.values(),
+        key=lambda mapping: (mapping.source_index if mapping.source_index is not None else 10**9, mapping.field_name),
+    )
 
 
 def _mapping_ratio(table_result: TableResult) -> float:
@@ -384,6 +514,34 @@ def _build_merged_mapped_columns(
     return sorted(merged_mapped.values(), key=lambda col: col.source_index)
 
 
+def _build_merged_derived_mappings(tables: list[TableResult]) -> list[DerivedMapping]:
+    merged: dict[str, DerivedMapping] = {}
+    for table_result in tables:
+        for mapping in getattr(table_result, "derived_mappings", []) or []:
+            existing = merged.get(mapping.field_name)
+            if existing is None:
+                merged[mapping.field_name] = DerivedMapping(
+                    field_name=mapping.field_name,
+                    source_header=mapping.source_header,
+                    source_index=mapping.source_index,
+                    score=mapping.score,
+                )
+                continue
+            score_candidates = [score for score in (existing.score, mapping.score) if score is not None]
+            source_header = existing.source_header if existing.source_header not in (None, "") else mapping.source_header
+            source_index = existing.source_index if existing.source_index is not None else mapping.source_index
+            merged[mapping.field_name] = DerivedMapping(
+                field_name=mapping.field_name,
+                source_header=source_header,
+                source_index=source_index,
+                score=max(score_candidates) if score_candidates else None,
+            )
+    return sorted(
+        merged.values(),
+        key=lambda mapping: (mapping.source_index if mapping.source_index is not None else 10**9, mapping.field_name),
+    )
+
+
 def _build_merged_column_scores(
     *,
     tables: list[TableResult],
@@ -423,6 +581,7 @@ def _build_merged_table_result(tables: list[TableResult], merged_df: pl.DataFram
     headers_by_name = _collect_source_headers_by_column_name(tables)
     source_columns = _build_merged_source_columns(merged_frame=merged_frame, headers_by_name=headers_by_name)
     mapped_columns = _build_merged_mapped_columns(tables=tables, merged_frame=merged_frame)
+    derived_mappings = _build_merged_derived_mappings(tables)
     mapped_names = {column.field_name for column in mapped_columns}
     unmapped_columns = [column for column in source_columns if merged_frame.column_names[column.index] not in mapped_names]
     duplicate_unmapped_names: set[str] = set()
@@ -443,6 +602,7 @@ def _build_merged_table_result(tables: list[TableResult], merged_df: pl.DataFram
         table_index=0,
         sheet_index=sheet_index,
         mapped_columns=mapped_columns,
+        derived_mappings=derived_mappings,
         unmapped_columns=unmapped_columns,
         column_scores=_build_merged_column_scores(tables=tables, merged_frame=merged_frame),
         duplicate_unmapped_indices=duplicate_unmapped_indices,
@@ -700,6 +860,15 @@ class Pipeline:
         if maybe_table is not None:
             table = maybe_table
 
+        derived_mappings = _collect_derived_mappings(
+            state=state,
+            table=table,
+            source_columns=source_cols,
+            mapped_columns=mapped_cols,
+            sheet_name=sheet.title,
+            table_index=table_index,
+        )
+
         table_result = TableResult(
             sheet_name=sheet.title,
             table=table,
@@ -708,6 +877,7 @@ class Pipeline:
             table_index=table_index,
             sheet_index=int(metadata.get("sheet_index", 0)) if isinstance(metadata, dict) else 0,
             mapped_columns=mapped_cols,
+            derived_mappings=derived_mappings,
             unmapped_columns=unmapped_cols,
             column_scores=scores_by_column,
             duplicate_unmapped_indices=set(duplicate_unmapped_indices),
