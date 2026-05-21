@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.8](https://github.com/clac-ca/ade-engine/compare/v1.9.7...v1.9.8) (2026-05-21)
+
+
+### Bug Fixes
+
+* **reports:** count zero-valid mapped columns ([#40](https://github.com/clac-ca/ade-engine/issues/40)) ([00534fe](https://github.com/clac-ca/ade-engine/commit/00534fedcdb14b5ff40384463f7f167e0a2c3612))
+
 ## [1.9.7](https://github.com/clac-ca/ade-engine/compare/v1.9.6...v1.9.7) (2026-05-21)
 
 
