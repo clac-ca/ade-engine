@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.6](https://github.com/clac-ca/ade-engine/compare/v1.9.5...v1.9.6) (2026-05-21)
+
+
+### Bug Fixes
+
+* **mapping:** Derived columns count as mapped ([#36](https://github.com/clac-ca/ade-engine/issues/36)) ([0d0b5e5](https://github.com/clac-ca/ade-engine/commit/0d0b5e5c2ef979e1c9d9d1e4c05f5478889e86db))
+
 ## [1.9.5](https://github.com/clac-ca/ade-engine/compare/v1.9.4...v1.9.5) (2026-05-21)
 
 
