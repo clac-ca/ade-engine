@@ -122,15 +122,191 @@ def test_run_completion_report_counts_derived_mappings_without_synthetic_columns
     assert fields["postal_code"].derived is True
     assert fields["postal_code"].source_headers == ["Address Line 1"]
     assert fields["postal_code"].occurrences.columns == 1
+    assert fields["postal_code"].valid_cells == 1
 
     run_fields = {field.field: field for field in payload.fields}
     assert payload.counts.fields.detected == 2
     assert run_fields["postal_code"].detected is True
     assert run_fields["postal_code"].derived is True
     assert run_fields["postal_code"].source_headers == ["Address Line 1"]
+    assert run_fields["postal_code"].valid_cells == 1
 
 
-def test_run_completion_report_counts_derived_validation_against_source_column() -> None:
+def test_run_completion_report_maps_against_non_empty_source_columns() -> None:
+    builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
+
+    source_columns = [
+        SourceColumn(index=0, header="Email", values=["alice@example.com", "bob@example.com"]),
+        SourceColumn(index=1, header="Notes", values=["keep", "review"]),
+        SourceColumn(index=2, header=None, values=[None, ""]),
+    ]
+
+    table = pl.DataFrame(
+        {
+            "email": ["alice@example.com", "bob@example.com"],
+            "Notes": ["keep", "review"],
+            "col_3": [None, ""],
+        }
+    )
+
+    builder.record_table(
+        TableResult(
+            sheet_name="Sheet1",
+            sheet_index=0,
+            table_index=0,
+            source_region=TableRegion(min_row=1, min_col=1, max_row=3, max_col=3),
+            source_columns=source_columns,
+            table=table,
+            row_count=table.height,
+            mapped_columns=[
+                MappedColumn(
+                    field_name="email",
+                    source_index=0,
+                    header="Email",
+                    values=["alice@example.com", "bob@example.com"],
+                    score=1.0,
+                )
+            ],
+        )
+    )
+
+    payload = builder.build(
+        run_status=RunStatus.SUCCEEDED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        error=None,
+        output_path=None,
+        output_written=False,
+    )
+
+    columns = payload.workbooks[0].sheets[0].tables[0].counts.columns
+    assert columns.total == 3
+    assert columns.empty == 1
+    assert columns.mapped == 1
+    assert columns.unmapped == 1
+
+
+def test_run_completion_report_counts_valid_cells_on_final_fields() -> None:
+    builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
+    registry = Registry()
+    registry.register_field(FieldDef(name="full_name", label="Full Name"))
+    registry.register_field(FieldDef(name="first_name", label="First Name"))
+    registry.register_field(FieldDef(name="middle_name", label="Middle Name"))
+    registry.register_field(FieldDef(name="last_name", label="Last Name"))
+    builder.set_registry(registry)
+
+    source_columns = [
+        SourceColumn(
+            index=0,
+            header="Full Name",
+            values=[
+                "Alice Beth Smith",
+                "Brian Carl Jones",
+                "Cara Dana Brown",
+                "Devin Evan Green",
+                "Ella Faye White",
+                "Finn Gray Black",
+                "Gina Hope Stone",
+            ],
+        ),
+    ]
+
+    table = pl.DataFrame(
+        {
+            "full_name": source_columns[0].values,
+            "first_name": ["Alice", "Brian", "Cara", "Devin", "Ella", "Finn", "Gina"],
+            "middle_name": ["Beth", "Carl", "Dana", "Evan", "Faye", "Gray", "Hope"],
+            "last_name": ["Smith", "Jones", "Brown", "Green", "White", "Black", "Stone"],
+        }
+    )
+
+    builder.record_table(
+        TableResult(
+            sheet_name="Sheet1",
+            sheet_index=0,
+            table_index=0,
+            source_region=TableRegion(min_row=1, min_col=1, max_row=8, max_col=1),
+            source_columns=source_columns,
+            table=table,
+            row_count=table.height,
+            mapped_columns=[
+                MappedColumn(
+                    field_name="full_name",
+                    source_index=0,
+                    header="Full Name",
+                    values=source_columns[0].values,
+                    score=1.0,
+                )
+            ],
+            derived_mappings=[
+                DerivedMapping(field_name="first_name", source_header="Full Name", source_index=0, score=1.0),
+                DerivedMapping(field_name="middle_name", source_header="Full Name", source_index=0, score=1.0),
+                DerivedMapping(field_name="last_name", source_header="Full Name", source_index=0, score=1.0),
+            ],
+        )
+    )
+
+    payload = builder.build(
+        run_status=RunStatus.SUCCEEDED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        error=None,
+        output_path=None,
+        output_written=False,
+    )
+
+    fields = {field.field: field for field in payload.fields}
+    assert fields["full_name"].valid_cells == 7
+    assert fields["first_name"].valid_cells == 7
+    assert fields["middle_name"].valid_cells == 7
+    assert fields["last_name"].valid_cells == 7
+
+
+def test_run_completion_report_counts_column_valid_cells_from_final_field_values() -> None:
+    builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
+
+    source_columns = [
+        SourceColumn(index=0, header="Email", values=["alice@example.com", "not an email"]),
+    ]
+
+    table = pl.DataFrame({"email": ["alice@example.com", None]})
+
+    builder.record_table(
+        TableResult(
+            sheet_name="Sheet1",
+            sheet_index=0,
+            table_index=0,
+            source_region=TableRegion(min_row=1, min_col=1, max_row=3, max_col=1),
+            source_columns=source_columns,
+            table=table,
+            row_count=table.height,
+            mapped_columns=[
+                MappedColumn(
+                    field_name="email",
+                    source_index=0,
+                    header="Email",
+                    values=source_columns[0].values,
+                    score=1.0,
+                )
+            ],
+        )
+    )
+
+    payload = builder.build(
+        run_status=RunStatus.SUCCEEDED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        error=None,
+        output_path=None,
+        output_written=False,
+    )
+
+    column = payload.workbooks[0].sheets[0].tables[0].structure.columns[0]
+    assert column.non_empty_cells == 2
+    assert column.valid_cells == 1
+
+
+def test_run_completion_report_counts_mapped_column_validation_on_final_field_only() -> None:
     builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
     registry = Registry()
     registry.register_field(FieldDef(name="full_name", label="Full Name"))
@@ -189,6 +365,4 @@ def test_run_completion_report_counts_derived_validation_against_source_column()
     table_summary = payload.workbooks[0].sheets[0].tables[0]
     assert len(table_summary.structure.columns) == 1
     assert table_summary.structure.columns[0].header.raw == "Full Name"
-    # Both derived validators fail on the second row, but the physical source
-    # cell should only be counted invalid once.
-    assert table_summary.structure.columns[0].valid_cells == 1
+    assert table_summary.structure.columns[0].valid_cells == 2

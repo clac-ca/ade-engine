@@ -88,6 +88,18 @@ class SourceColumn:
     header: Any
     values: list[Any]
 
+    @staticmethod
+    def _is_empty_cell(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ""
+        return False
+
+    @property
+    def is_empty(self) -> bool:
+        return self._is_empty_cell(self.header) and all(self._is_empty_cell(value) for value in self.values)
+
 
 @dataclass
 class MappedColumn:

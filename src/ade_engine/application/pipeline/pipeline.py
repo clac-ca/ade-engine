@@ -277,11 +277,18 @@ def _collect_derived_mappings(
 
 
 def _mapping_ratio(table_result: TableResult) -> float:
-    total_cols = len(getattr(table_result, "source_columns", []) or [])
-    if total_cols <= 0:
+    non_empty_source_indices = {
+        int(col.index) for col in (getattr(table_result, "source_columns", []) or []) if not col.is_empty
+    }
+    mappable_cols = len(non_empty_source_indices)
+    if mappable_cols <= 0:
         return 0.0
-    mapped_cols = len(getattr(table_result, "mapped_columns", []) or [])
-    return mapped_cols / total_cols
+    mapped_cols = sum(
+        1
+        for col in (getattr(table_result, "mapped_columns", []) or [])
+        if int(col.source_index) in non_empty_source_indices
+    )
+    return mapped_cols / mappable_cols
 
 
 def _sort_tables_by_mapping_ratio(tables: list[TableResult]) -> list[TableResult]:
