@@ -363,6 +363,7 @@ class RunCompletionReportBuilder:
 
         mapped_count = 0
         unmapped_count = 0
+        non_empty_source_columns = 0
 
         for col in source_cols:
             raw_header = None if col.header in (None, "") else str(col.header)
@@ -377,6 +378,8 @@ class RunCompletionReportBuilder:
             non_empty_cells = sum(1 for v in values if not _is_empty_cell(v))
             if non_empty_cells == 0:
                 empty_cols += 1
+            else:
+                non_empty_source_columns += 1
             non_empty_cells_total += non_empty_cells
 
             mapping, status_bucket = self._build_column_mapping(
@@ -433,6 +436,12 @@ class RunCompletionReportBuilder:
             )
 
         empty_rows = self._count_empty_rows(source_cols, data_row_count=source_row_count)
+
+        derived_mapped_count = len(getattr(table, "derived_mappings", []) or [])
+        mapped_count += derived_mapped_count
+        unmapped_count = max(0, non_empty_source_columns - (mapped_count - derived_mapped_count))
+        col_total = mapped_count + unmapped_count
+        empty_cols = 0
 
         detected_fields = self._detected_fields_in_table(table, expected_fields)
         detected_count = len(detected_fields)

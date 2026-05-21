@@ -112,8 +112,8 @@ def test_run_completion_report_counts_derived_mappings_without_synthetic_columns
     )
 
     table_summary = payload.workbooks[0].sheets[0].tables[0]
-    assert table_summary.counts.columns.total == 1
-    assert table_summary.counts.columns.mapped == 1
+    assert table_summary.counts.columns.total == 2
+    assert table_summary.counts.columns.mapped == 2
     assert table_summary.counts.fields.detected == 2
     assert len(table_summary.structure.columns) == 1
 
