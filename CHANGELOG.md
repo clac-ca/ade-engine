@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.5](https://github.com/clac-ca/ade-engine/compare/v1.9.4...v1.9.5) (2026-05-21)
+
+
+### Bug Fixes
+
+* **reporting:** count derived validation on source columns ([#34](https://github.com/clac-ca/ade-engine/issues/34)) ([94da2a1](https://github.com/clac-ca/ade-engine/commit/94da2a15157f81d3bd6e5402ab7f55e11b5246c6))
+
 ## [1.9.3](https://github.com/clac-ca/ade-engine/compare/v1.9.2...v1.9.3) (2026-04-14)
 
 
