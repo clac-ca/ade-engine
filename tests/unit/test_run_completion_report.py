@@ -243,8 +243,6 @@ def test_run_completion_report_counts_mapped_columns_with_no_valid_cells() -> No
     mapped_column = table_summary.structure.columns[0]
     assert mapped_column.mapping.status == "mapped"
     assert mapped_column.valid_cells == 0
-
-
 def test_run_completion_report_counts_valid_cells_on_final_fields() -> None:
     builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
     registry = Registry()
