@@ -355,7 +355,7 @@ class RunCompletionReportBuilder:
         scores_by_column: dict[int, dict[str, float]] = dict(getattr(table, "column_scores", {}) or {})
         duplicate_unmapped: set[int] = set(getattr(table, "duplicate_unmapped_indices", set()) or set())
 
-        invalid_by_field, validated_row_count = self._invalid_cells_by_field(table)
+        invalid_rows_by_field = self._invalid_cell_rows_by_field(table)
 
         empty_cols = 0
         non_empty_cells_total = 0
@@ -394,9 +394,22 @@ class RunCompletionReportBuilder:
 
             valid_cells = None
             if mapping.status == "mapped" and mapping.field is not None:
-                invalid_cells = invalid_by_field.get(mapping.field)
-                if invalid_cells is not None:
-                    valid_cells = max(0, int(non_empty_cells) - invalid_cells)
+                validation_fields = self._validation_fields_for_source_column(
+                    table=table,
+                    col_index=int(col.index),
+                    header_raw=raw_header,
+                    mapped_field=mapping.field,
+                )
+                invalid_rows: set[int] = set()
+                validated = False
+                for field in validation_fields:
+                    rows = invalid_rows_by_field.get(field)
+                    if rows is None:
+                        continue
+                    validated = True
+                    invalid_rows.update(rows)
+                if validated:
+                    valid_cells = max(0, int(non_empty_cells) - len(invalid_rows))
 
             columns.append(
                 ColumnStructure(
@@ -582,22 +595,55 @@ class RunCompletionReportBuilder:
             max_severity=_max_severity(by_sev),
         )
 
-    def _invalid_cells_by_field(self, table: TableResult) -> tuple[dict[str, int], int | None]:
+    def _invalid_cell_rows_by_field(self, table: TableResult) -> dict[str, set[int]]:
         df = getattr(table, "table", None)
         if not isinstance(df, pl.DataFrame) or df.height == 0:
-            return {}, None
+            return {}
 
-        invalid: dict[str, int] = {}
+        invalid: dict[str, set[int]] = {}
         for col in df.columns:
             if not col.startswith(_ISSUE_PREFIX):
                 continue
             field = col[len(_ISSUE_PREFIX) :]
             if not field:
                 continue
-            count = df.get_column(col).is_not_null().sum()
-            invalid[field] = int(count or 0)
+            invalid[field] = {
+                row_idx
+                for row_idx, value in enumerate(df.get_column(col).to_list())
+                if value is not None
+            }
 
-        return invalid, int(df.height)
+        return invalid
+
+    def _validation_fields_for_source_column(
+        self,
+        *,
+        table: TableResult,
+        col_index: int,
+        header_raw: str | None,
+        mapped_field: str,
+    ) -> list[str]:
+        fields = [mapped_field]
+        seen = {mapped_field}
+        header_key = header_raw.strip() if header_raw is not None else None
+
+        for mapping in getattr(table, "derived_mappings", []) or []:
+            field_name = str(getattr(mapping, "field_name", "") or "")
+            if not field_name or field_name in seen:
+                continue
+
+            source_index = getattr(mapping, "source_index", None)
+            if source_index is not None and int(source_index) == col_index:
+                fields.append(field_name)
+                seen.add(field_name)
+                continue
+
+            source_header = getattr(mapping, "source_header", None)
+            if header_key is not None and source_header not in (None, "") and str(source_header).strip() == header_key:
+                fields.append(field_name)
+                seen.add(field_name)
+
+        return fields
 
     # ------------------------------------------------------------------
     # Rollups
