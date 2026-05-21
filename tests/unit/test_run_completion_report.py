@@ -128,3 +128,67 @@ def test_run_completion_report_counts_derived_mappings_without_synthetic_columns
     assert run_fields["postal_code"].detected is True
     assert run_fields["postal_code"].derived is True
     assert run_fields["postal_code"].source_headers == ["Address Line 1"]
+
+
+def test_run_completion_report_counts_derived_validation_against_source_column() -> None:
+    builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
+    registry = Registry()
+    registry.register_field(FieldDef(name="full_name", label="Full Name"))
+    registry.register_field(FieldDef(name="first_name", label="First Name"))
+    registry.register_field(FieldDef(name="last_name", label="Last Name"))
+    builder.set_registry(registry)
+
+    source_columns = [
+        SourceColumn(index=0, header="Full Name", values=["Alice Smith", "Bad Name"]),
+    ]
+
+    table = pl.DataFrame(
+        {
+            "full_name": ["Alice Smith", "Bad Name"],
+            "first_name": ["Alice", None],
+            "last_name": ["Smith", None],
+            "__ade_issue__first_name": [None, "missing first name"],
+            "__ade_issue__last_name": [None, "missing last name"],
+        }
+    )
+
+    builder.record_table(
+        TableResult(
+            sheet_name="Sheet1",
+            sheet_index=0,
+            table_index=0,
+            source_region=TableRegion(min_row=1, min_col=1, max_row=3, max_col=1),
+            source_columns=source_columns,
+            table=table,
+            row_count=table.height,
+            mapped_columns=[
+                MappedColumn(
+                    field_name="full_name",
+                    source_index=0,
+                    header="Full Name",
+                    values=["Alice Smith", "Bad Name"],
+                    score=0.98,
+                )
+            ],
+            derived_mappings=[
+                DerivedMapping(field_name="first_name", source_header="Full Name", source_index=0, score=1.0),
+                DerivedMapping(field_name="last_name", source_header="Full Name", source_index=0, score=1.0),
+            ],
+        )
+    )
+
+    payload = builder.build(
+        run_status=RunStatus.SUCCEEDED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        error=None,
+        output_path=None,
+        output_written=False,
+    )
+
+    table_summary = payload.workbooks[0].sheets[0].tables[0]
+    assert len(table_summary.structure.columns) == 1
+    assert table_summary.structure.columns[0].header.raw == "Full Name"
+    # Both derived validators fail on the second row, but the physical source
+    # cell should only be counted invalid once.
+    assert table_summary.structure.columns[0].valid_cells == 1
