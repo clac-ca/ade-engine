@@ -4,7 +4,7 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "ade-engine"
-version = "1.9.2"
+version = "1.9.6"
 source = { editable = "." }
 dependencies = [
     { name = "openpyxl" },

@@ -254,11 +254,13 @@ class ColumnsCount(StrictModel):
         if self.empty > self.total:
             raise ValueError("columns.empty must be <= columns.total")
 
-        if any(x > self.total for x in (self.mapped, self.unmapped)):
-            raise ValueError("column mapping counts must be <= columns.total")
+        non_empty = self.total - self.empty
 
-        if (self.mapped + self.unmapped) != self.total:
-            raise ValueError("columns.(mapped+unmapped) must equal columns.total")
+        if any(x > non_empty for x in (self.mapped, self.unmapped)):
+            raise ValueError("column mapping counts must be <= non-empty columns")
+
+        if (self.mapped + self.unmapped) != non_empty:
+            raise ValueError("columns.(mapped+unmapped) must equal columns.total - columns.empty")
 
         return self
 
@@ -330,6 +332,7 @@ class FieldSummary(StrictModel):
     label: str | None = None
     detected: bool
     derived: bool = False
+    valid_cells: NonNegativeInt = 0
     best_mapping_score: NonNegativeFloat | None = None
     source_headers: list[str] = Field(default_factory=list)
     occurrences: FieldOccurrences
@@ -346,6 +349,8 @@ class FieldSummary(StrictModel):
             raise ValueError("best_mapping_score must be null when detected==false")
         if not self.detected and self.derived:
             raise ValueError("derived must be false when detected==false")
+        if not self.detected and self.valid_cells != 0:
+            raise ValueError("valid_cells must be 0 when detected==false")
         if not self.detected and self.source_headers:
             raise ValueError("source_headers must be empty when detected==false")
         return self

@@ -375,7 +375,8 @@ class RunCompletionReportBuilder:
 
             values = list(getattr(col, "values", []) or [])
             non_empty_cells = sum(1 for v in values if not _is_empty_cell(v))
-            if non_empty_cells == 0:
+            source_column_empty = bool(getattr(col, "is_empty", False))
+            if source_column_empty:
                 empty_cols += 1
             non_empty_cells_total += non_empty_cells
 
@@ -387,29 +388,19 @@ class RunCompletionReportBuilder:
                 duplicate_unmapped=duplicate_unmapped,
             )
 
-            if status_bucket == "mapped":
-                mapped_count += 1
-            else:
-                unmapped_count += 1
+            if not source_column_empty:
+                if status_bucket == "mapped":
+                    mapped_count += 1
+                else:
+                    unmapped_count += 1
 
             valid_cells = None
             if mapping.status == "mapped" and mapping.field is not None:
-                validation_fields = self._validation_fields_for_source_column(
+                valid_cells = self._valid_cells_for_final_field(
                     table=table,
-                    col_index=int(col.index),
-                    header_raw=raw_header,
-                    mapped_field=mapping.field,
+                    field=mapping.field,
+                    invalid_rows_by_field=invalid_rows_by_field,
                 )
-                invalid_rows: set[int] = set()
-                validated = False
-                for field in validation_fields:
-                    rows = invalid_rows_by_field.get(field)
-                    if rows is None:
-                        continue
-                    validated = True
-                    invalid_rows.update(rows)
-                if validated:
-                    valid_cells = max(0, int(non_empty_cells) - len(invalid_rows))
 
             columns.append(
                 ColumnStructure(
@@ -615,35 +606,21 @@ class RunCompletionReportBuilder:
 
         return invalid
 
-    def _validation_fields_for_source_column(
+    def _valid_cells_for_final_field(
         self,
         *,
         table: TableResult,
-        col_index: int,
-        header_raw: str | None,
-        mapped_field: str,
-    ) -> list[str]:
-        fields = [mapped_field]
-        seen = {mapped_field}
-        header_key = header_raw.strip() if header_raw is not None else None
+        field: str,
+        invalid_rows_by_field: dict[str, set[int]],
+    ) -> int | None:
+        df = getattr(table, "table", None)
+        if not isinstance(df, pl.DataFrame) or field not in df.columns:
+            return None
 
-        for mapping in getattr(table, "derived_mappings", []) or []:
-            field_name = str(getattr(mapping, "field_name", "") or "")
-            if not field_name or field_name in seen:
-                continue
-
-            source_index = getattr(mapping, "source_index", None)
-            if source_index is not None and int(source_index) == col_index:
-                fields.append(field_name)
-                seen.add(field_name)
-                continue
-
-            source_header = getattr(mapping, "source_header", None)
-            if header_key is not None and source_header not in (None, "") and str(source_header).strip() == header_key:
-                fields.append(field_name)
-                seen.add(field_name)
-
-        return fields
+        values = df.get_column(field).to_list()
+        non_empty = sum(1 for value in values if not _is_empty_cell(value))
+        invalid_rows = invalid_rows_by_field.get(field, set())
+        return max(0, int(non_empty) - len(invalid_rows))
 
     # ------------------------------------------------------------------
     # Rollups
@@ -741,6 +718,7 @@ class RunCompletionReportBuilder:
                     continue
                 occ["tables"] += f.occurrences.tables
                 occ["columns"] += f.occurrences.columns
+                occ["valid_cells"] += int(f.valid_cells)
                 occ["best"] = max(occ["best"], float(f.best_mapping_score or 0.0))
                 occ["derived"] = bool(occ["derived"] or f.derived)
                 occ["source_headers"].update(f.source_headers)
@@ -804,6 +782,7 @@ class RunCompletionReportBuilder:
                     continue
                 occ["tables"] += f.occurrences.tables
                 occ["columns"] += f.occurrences.columns
+                occ["valid_cells"] += int(f.valid_cells)
                 occ["best"] = max(occ["best"], float(f.best_mapping_score or 0.0))
                 occ["derived"] = bool(occ["derived"] or f.derived)
                 occ["source_headers"].update(f.source_headers)
@@ -840,7 +819,14 @@ class RunCompletionReportBuilder:
         out: dict[str, dict[str, Any]] = {}
         for f in expected_fields:
             name = str(getattr(f, "name", "") or "")
-            out[name] = {"tables": 0, "columns": 0, "best": 0.0, "derived": False, "source_headers": set()}
+            out[name] = {
+                "tables": 0,
+                "columns": 0,
+                "valid_cells": 0,
+                "best": 0.0,
+                "derived": False,
+                "source_headers": set(),
+            }
         return out
 
     def _accumulate_table_field_occurrences(
@@ -851,6 +837,7 @@ class RunCompletionReportBuilder:
     ) -> None:
         expected_names = set(self._expected_field_names(expected_fields))
         seen_in_table: set[str] = set()
+        valid_cells_by_field = self._valid_cells_by_field(table, expected_names)
 
         for col in getattr(table, "mapped_columns", []) or []:
             field_name = str(getattr(col, "field_name", "") or "")
@@ -883,6 +870,7 @@ class RunCompletionReportBuilder:
 
         for field in seen_in_table:
             occ[field]["tables"] += 1
+            occ[field]["valid_cells"] += valid_cells_by_field.get(field, 0)
 
     def _accumulate_field_occurrences(
         self, occ: dict[str, dict[str, Any]], expected_fields: list[Any], tables: list[TableSummary]
@@ -910,6 +898,7 @@ class RunCompletionReportBuilder:
                 record = occ.get(f.field)
                 if record is None:
                     continue
+                record["valid_cells"] += int(f.valid_cells)
                 # Only add fields that were not already represented by a
                 # physical mapped source column for this table. This preserves
                 # physical column counts while allowing derived mappings to
@@ -928,7 +917,7 @@ class RunCompletionReportBuilder:
         for f in expected_fields:
             name = str(getattr(f, "name", "") or "")
             label = getattr(f, "label", None)
-            rec = occ.get(name) or {"tables": 0, "columns": 0, "best": 0.0}
+            rec = occ.get(name) or {"tables": 0, "columns": 0, "valid_cells": 0, "best": 0.0}
             detected = bool(rec["tables"] > 0)
             out.append(
                 FieldSummary(
@@ -936,11 +925,28 @@ class RunCompletionReportBuilder:
                     label=str(label) if label is not None else None,
                     detected=detected,
                     derived=bool(rec.get("derived", False)) if detected else False,
+                    valid_cells=int(rec.get("valid_cells", 0)) if detected else 0,
                     best_mapping_score=float(rec["best"]) if detected else None,
                     source_headers=sorted(str(h) for h in rec.get("source_headers", set())) if detected else [],
                     occurrences=FieldOccurrences(tables=int(rec["tables"]), columns=int(rec["columns"])),
                 )
             )
+        return out
+
+    def _valid_cells_by_field(self, table: TableResult, expected_names: set[str]) -> dict[str, int]:
+        df = getattr(table, "table", None)
+        if not isinstance(df, pl.DataFrame) or df.height == 0:
+            return {}
+
+        invalid_rows_by_field = self._invalid_cell_rows_by_field(table)
+        out: dict[str, int] = {}
+        for field in expected_names:
+            if field not in df.columns:
+                continue
+            values = df.get_column(field).to_list()
+            non_empty = sum(1 for value in values if not _is_empty_cell(value))
+            invalid_rows = invalid_rows_by_field.get(field, set())
+            out[field] = max(0, int(non_empty) - len(invalid_rows))
         return out
 
     # ------------------------------------------------------------------
