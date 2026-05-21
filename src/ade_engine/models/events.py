@@ -329,15 +329,25 @@ class FieldSummary(StrictModel):
     field: str
     label: str | None = None
     detected: bool
+    derived: bool = False
     best_mapping_score: NonNegativeFloat | None = None
+    source_headers: list[str] = Field(default_factory=list)
     occurrences: FieldOccurrences
 
     @model_validator(mode="after")
     def _field_ok(self) -> "FieldSummary":
+        if self.source_headers != sorted(self.source_headers):
+            raise ValueError("source_headers must be sorted")
+        if len(set(self.source_headers)) != len(self.source_headers):
+            raise ValueError("source_headers must not contain duplicates")
         if self.detected and self.best_mapping_score is None:
             raise ValueError("best_mapping_score must be set when detected==true")
         if not self.detected and self.best_mapping_score is not None:
             raise ValueError("best_mapping_score must be null when detected==false")
+        if not self.detected and self.derived:
+            raise ValueError("derived must be false when detected==false")
+        if not self.detected and self.source_headers:
+            raise ValueError("source_headers must be empty when detected==false")
         return self
 
 
@@ -512,8 +522,14 @@ class TableSummary(StrictModel):
     locator: TableLocator
     counts: Counts
     validation: Validation
+    fields: list[FieldSummary] = Field(default_factory=list)
     structure: TableStructure
     outputs: Outputs | None = None
+
+    @model_validator(mode="after")
+    def _fields_ok(self) -> "TableSummary":
+        _validate_fields_rollup(self.fields, self.counts, scope="table")
+        return self
 
 
 class SheetScan(StrictModel):

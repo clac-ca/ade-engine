@@ -424,6 +424,9 @@ class RunCompletionReportBuilder:
         detected_fields = self._detected_fields_in_table(table, expected_fields)
         detected_count = len(detected_fields)
         not_detected_count = max(0, len(expected_fields) - detected_count)
+        field_occ = self._field_occurrences_init(expected_fields)
+        self._accumulate_table_field_occurrences(field_occ, expected_fields, table)
+        fields = self._field_summaries(expected_fields, field_occ)
 
         counts = Counts(
             rows=RowsCount(total=source_row_count, empty=empty_rows),
@@ -477,6 +480,7 @@ class RunCompletionReportBuilder:
             ),
             counts=counts,
             validation=validation,
+            fields=fields,
             structure=structure,
             outputs=outputs,
         )
@@ -604,6 +608,9 @@ class RunCompletionReportBuilder:
     def _detected_fields_in_table(self, table: TableResult, expected_fields: list[Any]) -> set[str]:
         expected = set(self._expected_field_names(expected_fields))
         detected = {str(getattr(c, "field_name", "") or "") for c in (getattr(table, "mapped_columns", []) or [])}
+        detected.update(
+            str(getattr(c, "field_name", "") or "") for c in (getattr(table, "derived_mappings", []) or [])
+        )
         return {f for f in detected if f in expected}
 
     def _rollup_sheet(self, expected_fields: list[Any], tables: list[TableSummary]) -> tuple[Counts, Validation, list[FieldSummary]]:
@@ -689,6 +696,8 @@ class RunCompletionReportBuilder:
                 occ["tables"] += f.occurrences.tables
                 occ["columns"] += f.occurrences.columns
                 occ["best"] = max(occ["best"], float(f.best_mapping_score or 0.0))
+                occ["derived"] = bool(occ["derived"] or f.derived)
+                occ["source_headers"].update(f.source_headers)
 
         validation.max_severity = _max_severity(validation.issues_by_severity)
         fields = self._field_summaries(expected_fields, field_occ)
@@ -750,6 +759,8 @@ class RunCompletionReportBuilder:
                 occ["tables"] += f.occurrences.tables
                 occ["columns"] += f.occurrences.columns
                 occ["best"] = max(occ["best"], float(f.best_mapping_score or 0.0))
+                occ["derived"] = bool(occ["derived"] or f.derived)
+                occ["source_headers"].update(f.source_headers)
 
         validation.max_severity = _max_severity(validation.issues_by_severity)
         fields = self._field_summaries(expected_fields, field_occ)
@@ -783,8 +794,49 @@ class RunCompletionReportBuilder:
         out: dict[str, dict[str, Any]] = {}
         for f in expected_fields:
             name = str(getattr(f, "name", "") or "")
-            out[name] = {"tables": 0, "columns": 0, "best": 0.0}
+            out[name] = {"tables": 0, "columns": 0, "best": 0.0, "derived": False, "source_headers": set()}
         return out
+
+    def _accumulate_table_field_occurrences(
+        self,
+        occ: dict[str, dict[str, Any]],
+        expected_fields: list[Any],
+        table: TableResult,
+    ) -> None:
+        expected_names = set(self._expected_field_names(expected_fields))
+        seen_in_table: set[str] = set()
+
+        for col in getattr(table, "mapped_columns", []) or []:
+            field_name = str(getattr(col, "field_name", "") or "")
+            if field_name not in expected_names:
+                continue
+            record = occ.get(field_name)
+            if record is None:
+                continue
+            record["columns"] += 1
+            record["best"] = max(record["best"], float(getattr(col, "score", None) or 0.0))
+            header = getattr(col, "header", None)
+            if header not in (None, ""):
+                record["source_headers"].add(str(header))
+            seen_in_table.add(field_name)
+
+        for mapping in getattr(table, "derived_mappings", []) or []:
+            field_name = str(getattr(mapping, "field_name", "") or "")
+            if field_name not in expected_names:
+                continue
+            record = occ.get(field_name)
+            if record is None:
+                continue
+            record["columns"] += 1
+            record["best"] = max(record["best"], float(getattr(mapping, "score", None) or 1.0))
+            record["derived"] = True
+            source_header = getattr(mapping, "source_header", None)
+            if source_header not in (None, ""):
+                record["source_headers"].add(str(source_header))
+            seen_in_table.add(field_name)
+
+        for field in seen_in_table:
+            occ[field]["tables"] += 1
 
     def _accumulate_field_occurrences(
         self, occ: dict[str, dict[str, Any]], expected_fields: list[Any], tables: list[TableSummary]
@@ -803,7 +855,25 @@ class RunCompletionReportBuilder:
                     continue
                 record["columns"] += 1
                 record["best"] = max(record["best"], float(m.score or 0.0))
+                if col.header.raw is not None:
+                    record["source_headers"].add(col.header.raw)
                 seen_in_table.add(m.field)
+            for f in t.fields:
+                if f.field not in expected_names or not f.detected:
+                    continue
+                record = occ.get(f.field)
+                if record is None:
+                    continue
+                # Only add fields that were not already represented by a
+                # physical mapped source column for this table. This preserves
+                # physical column counts while allowing derived mappings to
+                # participate in field rollups.
+                if f.field not in seen_in_table:
+                    record["columns"] += f.occurrences.columns
+                    record["best"] = max(record["best"], float(f.best_mapping_score or 0.0))
+                    seen_in_table.add(f.field)
+                record["derived"] = bool(record["derived"] or f.derived)
+                record["source_headers"].update(f.source_headers)
             for field in seen_in_table:
                 occ[field]["tables"] += 1
 
@@ -819,7 +889,9 @@ class RunCompletionReportBuilder:
                     field=name,
                     label=str(label) if label is not None else None,
                     detected=detected,
+                    derived=bool(rec.get("derived", False)) if detected else False,
                     best_mapping_score=float(rec["best"]) if detected else None,
+                    source_headers=sorted(str(h) for h in rec.get("source_headers", set())) if detected else [],
                     occurrences=FieldOccurrences(tables=int(rec["tables"]), columns=int(rec["columns"])),
                 )
             )

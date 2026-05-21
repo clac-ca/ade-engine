@@ -99,6 +99,20 @@ class MappedColumn:
 
 
 @dataclass
+class DerivedMapping:
+    """Logical field mapping produced by hooks/transforms.
+
+    Derived mappings report fields created from an existing source column without
+    adding a synthetic physical column to ``source_columns``.
+    """
+
+    field_name: str
+    source_header: Any
+    source_index: int | None = None
+    score: float | None = None
+
+
+@dataclass
 class TableResult:
     """Processed table facts for reporting/debugging.
 
@@ -112,6 +126,7 @@ class TableResult:
     table_index: int = 0
     sheet_index: int = 0
     mapped_columns: list[MappedColumn] = field(default_factory=list)
+    derived_mappings: list[DerivedMapping] = field(default_factory=list)
     unmapped_columns: list[SourceColumn] = field(default_factory=list)
     column_scores: dict[int, dict[str, float]] = field(default_factory=dict)
     duplicate_unmapped_indices: set[int] = field(default_factory=set)
@@ -120,7 +135,10 @@ class TableResult:
     output_sheet_name: str | None = None
 
     def mapping_lookup(self) -> dict[str, int | None]:
-        return {col.field_name: col.source_index for col in self.mapped_columns}
+        out: dict[str, int | None] = {col.field_name: col.source_index for col in self.mapped_columns}
+        for mapping in self.derived_mappings:
+            out.setdefault(mapping.field_name, mapping.source_index)
+        return out
 
 
-__all__ = ["SourceColumn", "MappedColumn", "TableRegion", "TableResult"]
+__all__ = ["SourceColumn", "MappedColumn", "DerivedMapping", "TableRegion", "TableResult"]

@@ -127,6 +127,59 @@ def test_process_sheet_sorts_tables_by_mapping_ratio():
     ]
 
 
+def test_process_sheet_records_derived_mapping_from_state_override():
+    registry = Registry()
+    logger = NullLogger()
+
+    registry.register_field(FieldDef(name="address_line1"))
+    registry.register_field(FieldDef(name="postal_code"))
+
+    def detector(*, row_index, **_):
+        if row_index == 1:
+            return {RowKind.HEADER.value: 1.0}
+        return {RowKind.DATA.value: 1.0}
+
+    def detect_address(*, column_header_original, **_):
+        return {"address_line1": 1.0} if column_header_original == "Address Line 1" else {}
+
+    def derive_postal_code(*, state, table_index, **_):
+        state.setdefault("ade_config", {}).setdefault("mapping_overrides", {}).setdefault(
+            "original_header_overrides", {}
+        )["postal_code"] = "Address Line 1"
+        return pl.lit("V1A 2B3")
+
+    registry.register_row_detector(detector, row_kind=RowKind.UNKNOWN.value, priority=0)
+    registry.register_column_detector(detect_address, field="address_line1", priority=0)
+    registry.register_column_transform(derive_postal_code, field="postal_code", priority=0)
+    registry.finalize()
+
+    pipeline = Pipeline(registry=registry, settings=Settings(), logger=logger)
+
+    source_wb = Workbook()
+    source_ws = source_wb.active
+    source_ws.title = "Sheet1"
+    source_ws.append(["Address Line 1"])
+    source_ws.append(["123 Main St V1A 2B3"])
+
+    output_wb = Workbook()
+    output_wb.remove(output_wb.active)
+    output_ws = output_wb.create_sheet(title="Sheet1")
+
+    tables = pipeline.process_sheet(
+        sheet=source_ws,
+        output_sheet=output_ws,
+        state={},
+        metadata={"input_file": "input.xlsx", "sheet_index": 0},
+        input_file_name="input.xlsx",
+    )
+
+    assert len(tables) == 1
+    assert [column.header for column in tables[0].source_columns] == ["Address Line 1"]
+    assert [(mapping.field_name, mapping.source_header, mapping.source_index) for mapping in tables[0].derived_mappings] == [
+        ("postal_code", "Address Line 1", 0)
+    ]
+
+
 def test_process_sheet_handles_mixed_numeric_types():
     registry = Registry()
     logger = NullLogger()
