@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.7](https://github.com/clac-ca/ade-engine/compare/v1.9.6...v1.9.7) (2026-05-21)
+
+
+### Bug Fixes
+
+* **reporting:** valid cells and mapped columns ([#38](https://github.com/clac-ca/ade-engine/issues/38)) ([9245877](https://github.com/clac-ca/ade-engine/commit/92458778b632e3f4ab2a4eeb3f9f9158715a5bdc))
+
 ## [1.9.6](https://github.com/clac-ca/ade-engine/compare/v1.9.5...v1.9.6) (2026-05-21)
 
 
