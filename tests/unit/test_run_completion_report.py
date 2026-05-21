@@ -186,6 +186,65 @@ def test_run_completion_report_maps_against_non_empty_source_columns() -> None:
     assert columns.unmapped == 1
 
 
+def test_run_completion_report_counts_mapped_columns_with_no_valid_cells() -> None:
+    builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
+    registry = Registry()
+    registry.register_field(FieldDef(name="email", label="Email"))
+    builder.set_registry(registry)
+
+    source_columns = [
+        SourceColumn(index=0, header="Email", values=[None, ""]),
+        SourceColumn(index=1, header=None, values=[None, ""]),
+    ]
+
+    table = pl.DataFrame({"email": [None, ""]})
+
+    builder.record_table(
+        TableResult(
+            sheet_name="Sheet1",
+            sheet_index=0,
+            table_index=0,
+            source_region=TableRegion(min_row=1, min_col=1, max_row=3, max_col=2),
+            source_columns=source_columns,
+            table=table,
+            row_count=table.height,
+            mapped_columns=[
+                MappedColumn(
+                    field_name="email",
+                    source_index=0,
+                    header="Email",
+                    values=source_columns[0].values,
+                    score=1.0,
+                )
+            ],
+        )
+    )
+
+    payload = builder.build(
+        run_status=RunStatus.SUCCEEDED,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        error=None,
+        output_path=None,
+        output_written=False,
+    )
+
+    table_summary = payload.workbooks[0].sheets[0].tables[0]
+    columns = table_summary.counts.columns
+    assert columns.total == 2
+    assert columns.empty == 1
+    assert columns.mapped == 1
+    assert columns.unmapped == 0
+
+    field = {field.field: field for field in table_summary.fields}["email"]
+    assert field.detected is True
+    assert field.valid_cells == 0
+
+    mapped_column = table_summary.structure.columns[0]
+    assert mapped_column.mapping.status == "mapped"
+    assert mapped_column.valid_cells == 0
+
+
 def test_run_completion_report_counts_valid_cells_on_final_fields() -> None:
     builder = RunCompletionReportBuilder(input_file=Path("input.xlsx"), settings=Settings())
     registry = Registry()

@@ -254,13 +254,14 @@ class ColumnsCount(StrictModel):
         if self.empty > self.total:
             raise ValueError("columns.empty must be <= columns.total")
 
-        non_empty = self.total - self.empty
+        if self.mapped > self.total:
+            raise ValueError("columns.mapped must be <= columns.total")
 
-        if any(x > non_empty for x in (self.mapped, self.unmapped)):
-            raise ValueError("column mapping counts must be <= non-empty columns")
+        if self.unmapped > (self.total - self.empty):
+            raise ValueError("columns.unmapped must be <= non-empty columns")
 
-        if (self.mapped + self.unmapped) != non_empty:
-            raise ValueError("columns.(mapped+unmapped) must equal columns.total - columns.empty")
+        if (self.mapped + self.unmapped) > self.total:
+            raise ValueError("columns.(mapped+unmapped) must be <= columns.total")
 
         return self
 

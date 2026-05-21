@@ -388,11 +388,10 @@ class RunCompletionReportBuilder:
                 duplicate_unmapped=duplicate_unmapped,
             )
 
-            if not source_column_empty:
-                if status_bucket == "mapped":
-                    mapped_count += 1
-                else:
-                    unmapped_count += 1
+            if status_bucket == "mapped":
+                mapped_count += 1
+            elif not source_column_empty:
+                unmapped_count += 1
 
             valid_cells = None
             if mapping.status == "mapped" and mapping.field is not None:
